@@ -1,0 +1,1 @@
+"""Manifest prospecting tool package."""
