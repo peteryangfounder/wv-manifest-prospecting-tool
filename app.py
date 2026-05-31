@@ -11,9 +11,7 @@ from src import db
 from src.config import PROJECT_ROOT, get_settings
 from src.pipeline import (
     enrich_candidates,
-    generate_verified_prospects,
     load_attendees,
-    load_and_classify_companies,
     run_default_pipeline,
     run_deterministic_classification,
     score_enriched_candidates,
@@ -384,6 +382,17 @@ def _run_sequence_and_store(label: str, func, *, success_message: str | None = N
     return results
 
 
+def _load_and_classify_companies():
+    return [load_attendees(conn, settings), run_deterministic_classification(conn)]
+
+
+def _generate_verified_prospects(enrich_limit: int, score_limit: int, force: bool):
+    return [
+        enrich_candidates(conn, settings, enrich_limit, force=force),
+        score_enriched_candidates(conn, settings, score_limit, force=force),
+    ]
+
+
 settings, conn = _connect()
 try:
     display_database_path = settings.database_path.relative_to(PROJECT_ROOT)
@@ -399,7 +408,7 @@ with st.sidebar:
     if st.button("1. Load & classify companies", type="primary", width="stretch"):
         _run_sequence_and_store(
             "Loading and classifying Manifest companies...",
-            lambda: load_and_classify_companies(conn, settings),
+            _load_and_classify_companies,
             success_message="Manifest companies loaded and prioritized. No paid API calls were made.",
         )
 
@@ -409,13 +418,7 @@ with st.sidebar:
         force_refresh_for_button = bool(st.session_state.get("force_refresh", False))
         _run_sequence_and_store(
             "Generating verified prospects...",
-            lambda: generate_verified_prospects(
-                conn,
-                settings,
-                enrich_limit=max_enrich_for_button,
-                score_limit=max_score_for_button,
-                force=force_refresh_for_button,
-            ),
+            lambda: _generate_verified_prospects(max_enrich_for_button, max_score_for_button, force_refresh_for_button),
         )
 
     if st.button("3. Verify cache reuse", width="stretch"):
@@ -561,7 +564,7 @@ if frame.empty:
     if st.button("Load & classify Manifest companies", type="primary", key="main_load_classify"):
         _run_sequence_and_store(
             "Loading and classifying Manifest companies...",
-            lambda: load_and_classify_companies(conn, settings),
+            _load_and_classify_companies,
             success_message="Manifest companies loaded and prioritized. No paid API calls were made.",
         )
         st.rerun()
