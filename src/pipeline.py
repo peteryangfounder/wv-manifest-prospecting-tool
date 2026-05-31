@@ -44,6 +44,7 @@ def run_deterministic_classification(conn) -> PipelineResult:
     run_id = db.start_run(conn, "deterministic_classification")
     companies = db.list_companies(conn)
     candidates = 0
+    high_priority = 0
 
     for company in companies:
         result = classify_company_name(company["canonical_name"])
@@ -54,6 +55,7 @@ def run_deterministic_classification(conn) -> PipelineResult:
             result.exclusion_reason,
             result.tags,
             result.is_candidate,
+            result.high_priority_enrichment,
         )
         enriched_company = {
             **company,
@@ -63,6 +65,7 @@ def run_deterministic_classification(conn) -> PipelineResult:
         }
         db.save_baseline_score_if_missing_or_baseline(conn, company["id"], baseline_score(enriched_company))
         candidates += 1 if result.is_candidate else 0
+        high_priority += 1 if result.high_priority_enrichment else 0
 
     db.finish_run(
         conn,
@@ -70,12 +73,12 @@ def run_deterministic_classification(conn) -> PipelineResult:
         unique_count=len(companies),
         candidates_count=candidates,
         scored_count=len(companies),
-        notes="Baseline deterministic scores created for the full attendee list.",
+        notes=f"Baseline deterministic scores created for the full attendee list; high_priority_queue={high_priority}.",
     )
     return PipelineResult(
         "deterministic_classification",
-        f"Classified {len(companies):,} companies; {candidates:,} are candidates for enrichment.",
-        {"companies": len(companies), "candidates": candidates},
+        f"Classified {len(companies):,} companies; {candidates:,} broad candidates; {high_priority:,} high-priority for paid enrichment.",
+        {"companies": len(companies), "candidates": candidates, "high_priority_queue": high_priority},
     )
 
 
@@ -91,7 +94,7 @@ def enrich_candidates(conn, settings: Settings, limit: int | None = None, force:
         )
 
     client = TavilyClient(settings.tavily_api_key, settings.tavily_max_results)
-    companies = db.candidates_for_enrichment(conn, limit=limit, force=force)
+    companies = db.candidates_for_enrichment(conn, limit=limit, force=force, high_priority_only=True)
     calls = 0
     enriched = 0
     errors = 0
@@ -130,7 +133,7 @@ def score_enriched_candidates(conn, settings: Settings, limit: int | None = None
             {"openai_calls": 0, "scored": 0, "errors": 0},
         )
 
-    companies = db.enriched_for_openai_scoring(conn, limit=limit, force=force)
+    companies = db.enriched_for_openai_scoring(conn, limit=limit, force=force, high_priority_only=True)
     calls = 0
     scored = 0
     errors = 0

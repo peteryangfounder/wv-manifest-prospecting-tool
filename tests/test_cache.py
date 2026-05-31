@@ -37,6 +37,7 @@ def test_verify_cache_reuse_uses_sqlite_without_paid_calls(tmp_path: Path) -> No
         None,
         ["logistics", "ai"],
         True,
+        True,
     )
     db.save_enrichment(
         conn,

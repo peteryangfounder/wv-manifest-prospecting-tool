@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from .clean import normalize_name
@@ -206,6 +207,37 @@ TECH_SIGNALS = (
     "blockchain",
 )
 
+HIGH_PRIORITY_TECH_SIGNALS = (
+    "ai",
+    "robot",
+    "robotics",
+    "saas",
+    "software",
+    "platform",
+    "automation",
+    "analytics",
+    "visibility",
+    "autonomous",
+    "optimization",
+    "optimisation",
+    "wms",
+    "tms",
+    "machine learning",
+    "computer vision",
+)
+
+HIGH_PRIORITY_DOMAIN_SIGNALS = (
+    "warehouse automation",
+    "retail infrastructure",
+    "healthcare operations",
+    "supply chain tech",
+    "supply chain technology",
+    "climate",
+    "sustainability",
+    "carbon",
+    "emissions",
+)
+
 SECTOR_KEYWORDS = {
     "commerce": ("commerce", "ecommerce", "e commerce", "retail", "marketplace", "checkout", "merchant"),
     "healthcare": ("health", "healthcare", "pharma", "pharmacy", "medical", "clinical", "care"),
@@ -226,6 +258,7 @@ SECTOR_KEYWORDS = {
 class RuleResult:
     deterministic_type: str
     is_candidate: bool
+    high_priority_enrichment: bool
     exclusion_reason: str | None
     tags: list[str]
 
@@ -244,6 +277,49 @@ def _has_any(text: str, keywords: tuple[str, ...]) -> bool:
     return False
 
 
+def _has_ai_brand_signal(raw_name: str, normalized: str) -> bool:
+    compact = (raw_name or "").strip()
+    lower = compact.lower()
+    if ".ai" in lower or lower.endswith(".ai"):
+        return True
+    if re.search(r"(^|[\s._-])ai($|[\s._-])", lower):
+        return True
+    if compact.endswith("AI") and len(normalized) > 3:
+        return True
+    return False
+
+
+def _is_high_priority_candidate(
+    raw_name: str,
+    normalized: str,
+    text: str,
+    deterministic_type: str,
+    tags: list[str],
+) -> bool:
+    if deterministic_type != "likely_startup_or_tech":
+        return False
+
+    strong_tech = _has_any(text, HIGH_PRIORITY_TECH_SIGNALS) or _has_ai_brand_signal(raw_name, normalized)
+    domain_signal = _has_any(text, HIGH_PRIORITY_DOMAIN_SIGNALS)
+    priority_tags = {
+        "ai",
+        "robotics",
+        "warehouse_automation",
+        "retail_infrastructure",
+        "healthcare",
+        "climate",
+    }
+
+    if strong_tech:
+        return True
+    if domain_signal and {"logistics", "supply_chain", "retail_infrastructure", "healthcare", "climate"}.intersection(tags):
+        return True
+    if priority_tags.intersection(tags) and _has_any(text, TECH_SIGNALS):
+        return True
+
+    return False
+
+
 def detect_sector_tags(raw_name: str) -> list[str]:
     text = f" {normalize_name(raw_name)} "
     tags = []
@@ -259,16 +335,18 @@ def classify_company_name(raw_name: str) -> RuleResult:
     tags = detect_sector_tags(raw_name)
     has_tech = _has_any(text, TECH_SIGNALS)
     has_logistics = _has_any(text, LOGISTICS_SERVICE_KEYWORDS)
+    has_tech = has_tech or _has_ai_brand_signal(raw_name, normalized)
 
     if len(normalized) < 2 or normalized in {"na", "none", "unknown", "test"}:
-        return RuleResult("duplicate_or_noisy_entry", False, "Noisy or incomplete attendee entry.", tags)
+        return RuleResult("duplicate_or_noisy_entry", False, False, "Noisy or incomplete attendee entry.", tags)
 
     if normalized in SELF_OR_RELATED:
-        return RuleResult("duplicate_or_noisy_entry", False, "Wittington-related entry, not a prospect.", tags)
+        return RuleResult("duplicate_or_noisy_entry", False, False, "Wittington-related entry, not a prospect.", tags)
 
     if normalized in KNOWN_INCUMBENTS:
         return RuleResult(
             "incumbent_or_public_company",
+            False,
             False,
             "Known large incumbent or public company.",
             tags,
@@ -278,6 +356,7 @@ def classify_company_name(raw_name: str) -> RuleResult:
         return RuleResult(
             "investor_or_financial_firm",
             False,
+            False,
             "Investor or financial services firm rather than an operating startup.",
             tags,
         )
@@ -285,6 +364,7 @@ def classify_company_name(raw_name: str) -> RuleResult:
     if _has_any(text, MEDIA_ASSOCIATION_KEYWORDS):
         return RuleResult(
             "media_event_association",
+            False,
             False,
             "Media, event, or association attendee rather than a startup prospect.",
             tags,
@@ -294,6 +374,7 @@ def classify_company_name(raw_name: str) -> RuleResult:
         return RuleResult(
             "university_government_nonprofit",
             False,
+            False,
             "University, government, port authority, or nonprofit entry.",
             tags,
         )
@@ -301,6 +382,7 @@ def classify_company_name(raw_name: str) -> RuleResult:
     if _has_any(text, CONSULTING_KEYWORDS):
         return RuleResult(
             "consulting_or_agency",
+            False,
             False,
             "Consulting, agency, advisory, or legal services firm.",
             tags,
@@ -310,19 +392,28 @@ def classify_company_name(raw_name: str) -> RuleResult:
         return RuleResult(
             "logistics_service_provider",
             False,
+            False,
             "Likely logistics services provider; no obvious software or platform signal.",
             tags or ["logistics"],
         )
 
     if has_tech:
-        return RuleResult("likely_startup_or_tech", True, None, tags or ["technology"])
+        priority_tags = tags or ["technology"]
+        return RuleResult(
+            "likely_startup_or_tech",
+            True,
+            _is_high_priority_candidate(raw_name, normalized, text, "likely_startup_or_tech", priority_tags),
+            None,
+            priority_tags,
+        )
 
     if _has_any(text, RETAIL_BRAND_KEYWORDS) and not has_tech:
         return RuleResult(
             "retailer_or_brand_incumbent",
             False,
+            False,
             "Likely retailer, brand, or CPG incumbent rather than venture-backed technology.",
             tags,
         )
 
-    return RuleResult("unknown_needs_enrichment", True, None, tags)
+    return RuleResult("unknown_needs_enrichment", True, False, None, tags)

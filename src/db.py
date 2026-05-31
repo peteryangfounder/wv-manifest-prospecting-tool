@@ -36,6 +36,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             deterministic_exclusion_reason TEXT,
             deterministic_tags TEXT DEFAULT '[]',
             is_candidate INTEGER DEFAULT 0,
+            high_priority_enrichment INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -97,7 +98,14 @@ def init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    _ensure_column(conn, "companies", "high_priority_enrichment", "INTEGER DEFAULT 0")
     conn.commit()
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, column_type: str) -> None:
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
 
 def start_run(conn: sqlite3.Connection, run_type: str, notes: str | None = None) -> int:
@@ -174,6 +182,7 @@ def update_deterministic_result(
     exclusion_reason: str | None,
     tags: list[str],
     is_candidate: bool,
+    high_priority_enrichment: bool,
 ) -> None:
     conn.execute(
         """
@@ -182,6 +191,7 @@ def update_deterministic_result(
             deterministic_exclusion_reason = ?,
             deterministic_tags = ?,
             is_candidate = ?,
+            high_priority_enrichment = ?,
             updated_at = ?
         WHERE id = ?
         """,
@@ -190,6 +200,7 @@ def update_deterministic_result(
             exclusion_reason,
             json.dumps(tags),
             1 if is_candidate else 0,
+            1 if high_priority_enrichment else 0,
             now_iso(),
             company_id,
         ),
@@ -314,24 +325,30 @@ def save_baseline_score_if_missing_or_baseline(
     return True
 
 
-def candidates_for_enrichment(conn: sqlite3.Connection, limit: int, force: bool = False) -> list[dict[str, Any]]:
+def candidates_for_enrichment(
+    conn: sqlite3.Connection,
+    limit: int,
+    force: bool = False,
+    high_priority_only: bool = True,
+) -> list[dict[str, Any]]:
+    priority_filter = "AND c.high_priority_enrichment = 1" if high_priority_only else ""
     if force:
-        query = """
+        query = f"""
             SELECT c.*
             FROM companies c
-            WHERE c.is_candidate = 1
+            WHERE c.is_candidate = 1 {priority_filter}
             ORDER BY
               CASE c.deterministic_type WHEN 'likely_startup_or_tech' THEN 0 ELSE 1 END,
               c.canonical_name COLLATE NOCASE
             LIMIT ?
         """
     else:
-        query = """
+        query = f"""
             SELECT c.*
             FROM companies c
             LEFT JOIN enrichments e
               ON e.company_id = c.id AND e.provider = 'tavily' AND e.status = 'success'
-            WHERE c.is_candidate = 1 AND e.id IS NULL
+            WHERE c.is_candidate = 1 {priority_filter} AND e.id IS NULL
             ORDER BY
               CASE c.deterministic_type WHEN 'likely_startup_or_tech' THEN 0 ELSE 1 END,
               c.canonical_name COLLATE NOCASE
@@ -341,11 +358,17 @@ def candidates_for_enrichment(conn: sqlite3.Connection, limit: int, force: bool 
     return [dict(row) for row in rows]
 
 
-def enriched_for_openai_scoring(conn: sqlite3.Connection, limit: int, force: bool = False) -> list[dict[str, Any]]:
+def enriched_for_openai_scoring(
+    conn: sqlite3.Connection,
+    limit: int,
+    force: bool = False,
+    high_priority_only: bool = True,
+) -> list[dict[str, Any]]:
     if force:
         score_filter = ""
     else:
         score_filter = "AND (s.id IS NULL OR s.provider != 'openai')"
+    priority_filter = "AND c.high_priority_enrichment = 1" if high_priority_only else ""
 
     rows = conn.execute(
         f"""
@@ -353,7 +376,7 @@ def enriched_for_openai_scoring(conn: sqlite3.Connection, limit: int, force: boo
         FROM companies c
         JOIN enrichments e ON e.company_id = c.id AND e.provider = 'tavily' AND e.status = 'success'
         LEFT JOIN scores s ON s.company_id = c.id
-        WHERE c.is_candidate = 1 {score_filter}
+        WHERE c.is_candidate = 1 {priority_filter} {score_filter}
         ORDER BY
           CASE c.deterministic_type WHEN 'likely_startup_or_tech' THEN 0 ELSE 1 END,
           c.canonical_name COLLATE NOCASE
@@ -401,6 +424,7 @@ def dashboard_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             c.deterministic_exclusion_reason,
             c.deterministic_tags,
             c.is_candidate,
+            c.high_priority_enrichment,
             s.provider AS score_provider,
             s.company_type,
             s.is_startup_likely,
@@ -437,7 +461,8 @@ def metrics(conn: sqlite3.Connection) -> dict[str, Any]:
         SELECT
           COALESCE(SUM(duplicate_count), 0) AS raw_companies,
           COUNT(*) AS unique_companies,
-          SUM(CASE WHEN is_candidate = 1 THEN 1 ELSE 0 END) AS candidates
+          SUM(CASE WHEN is_candidate = 1 THEN 1 ELSE 0 END) AS candidates,
+          SUM(CASE WHEN high_priority_enrichment = 1 THEN 1 ELSE 0 END) AS high_priority_queue
         FROM companies
         """
     ).fetchone()
@@ -451,6 +476,7 @@ def metrics(conn: sqlite3.Connection) -> dict[str, Any]:
         "raw_companies": int(row["raw_companies"] or 0),
         "unique_companies": int(row["unique_companies"] or 0),
         "candidates": int(row["candidates"] or 0),
+        "high_priority_queue": int(row["high_priority_queue"] or 0),
         "enriched": int(enrichment_count or 0),
         "scored": int(scored_count or 0),
         "openai_scored": int(openai_count or 0),

@@ -65,7 +65,7 @@ CUSTOM_CSS = """
   .metric-grid {
     display: grid;
     gap: 0.75rem;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     margin: 1rem 0 1.2rem 0;
   }
   .metric-card {
@@ -226,6 +226,7 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["primary_source_url"] = frame.get("top_urls", pd.Series(dtype=object)).apply(lambda urls: urls[0] if urls else "")
     frame["total_score"] = frame["total_score"].fillna(0).astype(int)
     frame["is_startup_likely"] = frame["is_startup_likely"].fillna(0).astype(int)
+    frame["high_priority_enrichment"] = frame["high_priority_enrichment"].fillna(0).astype(int)
     frame["wittington_edge"] = frame["wittington_edge"].fillna(0).astype(int)
     frame["company_type"] = frame["company_type"].fillna(frame["deterministic_type"]).fillna("unscored")
     frame["confidence"] = frame["confidence"].fillna("low")
@@ -381,6 +382,7 @@ frame = _rows_to_frame(rows)
 metrics = db.metrics(conn)
 
 startup_only = False
+priority_only = False
 min_score = 0
 selected_types: list[str] = []
 selected_sectors: list[str] = []
@@ -392,6 +394,7 @@ with st.sidebar:
         st.caption("Load the Manifest list to enable filters.")
     else:
         startup_only = st.checkbox("Startup-likely only", value=False)
+        priority_only = st.checkbox("High-priority queue only", value=False)
         min_score = st.slider("Minimum score", min_value=0, max_value=100, value=0)
         type_options = sorted([value for value in frame["company_type"].dropna().unique().tolist() if value])
         confidence_options = sorted([value for value in frame["confidence"].dropna().unique().tolist() if value])
@@ -401,7 +404,7 @@ with st.sidebar:
         selected_confidence = st.multiselect("Confidence", confidence_options, default=[])
 
     with st.expander("Notes", expanded=False):
-        st.write("Deterministic screening runs before paid calls. Tavily and OpenAI results are cached by company.")
+        st.write("The full list is ranked, but paid Tavily/OpenAI calls default to the high-priority queue.")
 
 st.markdown(
     """
@@ -421,8 +424,9 @@ last_cache_hits = int(last_run.get("cache_hits") or 0)
 _render_metric_cards(
     [
         ("Universe", _format_int(metrics["unique_companies"]), f"{_format_int(metrics['raw_companies'])} raw rows"),
-        ("Candidates", _format_int(metrics["candidates"]), f"{_pct(metrics['candidates'], metrics['unique_companies'])} of unique"),
-        ("Enriched", _format_int(metrics["enriched"]), f"{_pct(metrics['enriched'], metrics['candidates'])} of candidates"),
+        ("Broad candidates", _format_int(metrics["candidates"]), f"{_pct(metrics['candidates'], metrics['unique_companies'])} of unique"),
+        ("High-priority queue", _format_int(metrics["high_priority_queue"]), f"{_pct(metrics['high_priority_queue'], metrics['unique_companies'])} of unique"),
+        ("Enriched", _format_int(metrics["enriched"]), f"{_pct(metrics['enriched'], metrics['high_priority_queue'])} of high-priority"),
         ("OpenAI scored", _format_int(metrics["openai_scored"]), f"{_pct(metrics['openai_scored'], metrics['enriched'])} of enriched"),
         ("Last API calls", _format_int(last_api_calls), "Tavily plus OpenAI"),
         ("Cache hits", _format_int(last_cache_hits), "latest run"),
@@ -441,6 +445,8 @@ else:
     filtered = frame[frame["total_score"] >= min_score].copy()
     if startup_only:
         filtered = filtered[filtered["is_startup_likely"] == 1]
+    if priority_only:
+        filtered = filtered[filtered["high_priority_enrichment"] == 1]
     if selected_types:
         filtered = filtered[filtered["company_type"].isin(selected_types)]
     if selected_confidence:
@@ -456,10 +462,11 @@ else:
 
         funnel_df = pd.DataFrame(
             {
-                "Stage": ["Unique", "Candidates", "Enriched", "OpenAI scored"],
+                "Stage": ["Unique", "Broad candidates", "High-priority", "Enriched", "OpenAI scored"],
                 "Companies": [
                     metrics["unique_companies"],
                     metrics["candidates"],
+                    metrics["high_priority_queue"],
                     metrics["enriched"],
                     metrics["openai_scored"],
                 ],
@@ -506,6 +513,7 @@ else:
             "total_score",
             "company_type",
             "is_startup_likely",
+            "high_priority_enrichment",
             "sector_tags_text",
             "wittington_edge",
             "confidence",
@@ -521,6 +529,7 @@ else:
                 "total_score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100),
                 "company_type": st.column_config.TextColumn("Type"),
                 "is_startup_likely": st.column_config.CheckboxColumn("Startup"),
+                "high_priority_enrichment": st.column_config.CheckboxColumn("Priority"),
                 "sector_tags_text": st.column_config.TextColumn("Sectors"),
                 "wittington_edge": st.column_config.NumberColumn("WV edge", min_value=0, max_value=20),
                 "confidence": st.column_config.TextColumn("Confidence"),

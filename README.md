@@ -10,6 +10,7 @@ The product thesis is simple: use code for retrieval and storage, use determinis
 - Parses, cleans, normalizes, and deduplicates messy attendee names.
 - Stores all companies, enrichments, scores, and run metadata in SQLite.
 - Runs cheap deterministic classification across the full list before paid enrichment.
+- Builds a stricter high-priority enrichment queue so paid API calls are not spent on every broad candidate.
 - Uses Tavily search as the external API enrichment layer for likely candidates.
 - Uses OpenAI for structured scoring only after Tavily evidence exists.
 - Presents a Streamlit dashboard with metrics, filters, source evidence, CSV export, and a sortable ranked table.
@@ -20,7 +21,7 @@ The assignment emphasizes repeatability, cost control, and smart use of AI. The 
 
 1. **Retrieve in code:** requests and BeautifulSoup fetch the attendee page; Tavily retrieves web evidence.
 2. **Cache everything:** SQLite prevents repeated scraping, search, or scoring work on reruns.
-3. **Filter before spend:** deterministic rules screen out incumbents, investors, media, universities, consultants, and plain service providers.
+3. **Filter before spend:** deterministic rules rank the full list, preserve a broad candidate count, and send paid enrichment only to a stricter high-priority queue.
 4. **Use AI for judgment:** OpenAI receives only company name, deterministic tags, and top search snippets, then returns structured JSON.
 5. **Keep the UI simple:** Streamlit is enough for a reviewable internal workflow.
 
@@ -32,6 +33,7 @@ The assignment emphasizes repeatability, cost control, and smart use of AI. The 
 - Queryable data layer: SQLite schema in `src/db.py`
 - Rerun cache: enrichments and scores are keyed by company/provider
 - Deterministic fit logic: `src/rules.py`
+- Paid-call cost control: Tavily/OpenAI default to high-priority companies only
 - AI synthesis and scoring: `src/classify.py`
 - Wittington-specific scoring: encoded in `src/config.py` and scoring prompt
 - Sortable ranked view: Streamlit dataframe in `app.py`
@@ -106,7 +108,9 @@ python scripts/run_pipeline.py --score --max-score 25
 
 `src/clean.py` preserves the raw company name while creating a normalized key for deduplication. Legal suffixes like `Inc.`, `LLC`, and `Corporation` are removed only for dedupe.
 
-`src/rules.py` applies cheap classification before any paid API call. It excludes obvious non-targets such as large incumbents, investors, associations, universities, consultancies, and logistics service providers without software/platform signals. It keeps likely startup/tech and ambiguous entries as candidates.
+`src/rules.py` applies cheap classification before any paid API call. It excludes obvious non-targets such as large incumbents, investors, associations, universities, consultancies, pure carriers, ports, trucking firms, and logistics service providers without software/platform signals. It still ranks the full attendee list and preserves a broad candidate count, but paid enrichment defaults to a much stricter high-priority queue.
+
+The high-priority queue requires stronger startup or technology evidence: AI, robotics, SaaS, software, automation, platform, analytics, visibility, autonomous systems, optimization, warehouse automation, standalone WMS/TMS signals, retail infrastructure, healthcare operations, climate/sustainability, supply-chain technology, or startup-like evidence such as `.ai` branding. This keeps the workflow cost-aware while still allowing the dashboard to display the whole universe.
 
 `src/enrich.py` calls Tavily with a compact company-search query and stores titles, URLs, snippets, and raw JSON in SQLite.
 
@@ -118,6 +122,7 @@ python scripts/run_pipeline.py --score --max-score 25
 - Company rows are keyed by normalized name.
 - Tavily enrichments are keyed by company/provider.
 - OpenAI scores are keyed by company and marked with provider `openai`.
+- Paid Tavily/OpenAI runs default to the high-priority queue, not the broader candidate pool.
 - The UI defaults to bounded `MAX_ENRICH` and `MAX_SCORE` values.
 - The deterministic baseline gives a ranked full-list view even before API keys are configured.
 - A force-refresh checkbox exists, but normal reruns reuse cached rows.
