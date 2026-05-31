@@ -226,6 +226,8 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["primary_source_url"] = frame.get("top_urls", pd.Series(dtype=object)).apply(lambda urls: urls[0] if urls else "")
     frame["total_score"] = frame["total_score"].fillna(0).astype(int)
     frame["is_startup_likely"] = frame["is_startup_likely"].fillna(0).astype(int)
+    if "high_priority_enrichment" not in frame.columns:
+        frame["high_priority_enrichment"] = 0
     frame["high_priority_enrichment"] = frame["high_priority_enrichment"].fillna(0).astype(int)
     frame["wittington_edge"] = frame["wittington_edge"].fillna(0).astype(int)
     frame["company_type"] = frame["company_type"].fillna(frame["deterministic_type"]).fillna("unscored")

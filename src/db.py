@@ -98,13 +98,24 @@ def init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    _ensure_column(conn, "companies", "high_priority_enrichment", "INTEGER DEFAULT 0")
+    migrate_schema(conn)
     conn.commit()
 
 
+def migrate_schema(conn: sqlite3.Connection) -> None:
+    """Apply additive migrations for SQLite databases created by older app versions."""
+    _ensure_column(conn, "companies", "high_priority_enrichment", "INTEGER DEFAULT 0")
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    columns: set[str] = set()
+    for row in conn.execute(f"PRAGMA table_info({table})"):
+        columns.add(row["name"] if isinstance(row, sqlite3.Row) else row[1])
+    return columns
+
+
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, column_type: str) -> None:
-    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
-    if column not in columns:
+    if column not in _table_columns(conn, table):
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
 
@@ -412,6 +423,7 @@ def cached_company_for_verification(conn: sqlite3.Connection) -> dict[str, Any] 
 
 
 def dashboard_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    migrate_schema(conn)
     rows = conn.execute(
         """
         SELECT
