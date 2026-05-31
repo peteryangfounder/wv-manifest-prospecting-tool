@@ -291,9 +291,27 @@ def get_successful_enrichment(conn: sqlite3.Connection, company_id: int, provide
     return dict(row) if row else None
 
 
-def get_score(conn: sqlite3.Connection, company_id: int) -> dict[str, Any] | None:
-    row = conn.execute("SELECT * FROM scores WHERE company_id = ?", (company_id,)).fetchone()
+def get_score(conn: sqlite3.Connection, company_id: int, provider: str | None = None) -> dict[str, Any] | None:
+    if provider is None:
+        row = conn.execute("SELECT * FROM scores WHERE company_id = ?", (company_id,)).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM scores WHERE company_id = ? AND provider = ?",
+            (company_id, provider),
+        ).fetchone()
     return dict(row) if row else None
+
+
+def save_baseline_score_if_missing_or_baseline(
+    conn: sqlite3.Connection,
+    company_id: int,
+    score: dict[str, Any],
+) -> bool:
+    existing = get_score(conn, company_id)
+    if existing and existing.get("provider") == "openai":
+        return False
+    save_score(conn, company_id, score, provider="baseline")
+    return True
 
 
 def candidates_for_enrichment(conn: sqlite3.Connection, limit: int, force: bool = False) -> list[dict[str, Any]]:
@@ -344,6 +362,30 @@ def enriched_for_openai_scoring(conn: sqlite3.Connection, limit: int, force: boo
         (limit,),
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+def cached_company_for_verification(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        SELECT
+            c.*,
+            e.top_titles,
+            e.top_urls,
+            e.top_snippets,
+            e.website,
+            e.raw_json AS enrichment_raw_json,
+            s.provider AS score_provider,
+            s.total_score AS cached_total_score
+        FROM companies c
+        JOIN enrichments e
+          ON e.company_id = c.id AND e.provider = 'tavily' AND e.status = 'success'
+        JOIN scores s
+          ON s.company_id = c.id AND s.provider = 'openai'
+        ORDER BY COALESCE(s.total_score, 0) DESC, c.canonical_name COLLATE NOCASE
+        LIMIT 1
+        """
+    ).fetchone()
+    return dict(row) if row else None
 
 
 def dashboard_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:

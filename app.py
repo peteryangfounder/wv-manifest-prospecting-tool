@@ -14,6 +14,7 @@ from src.pipeline import (
     run_default_pipeline,
     run_deterministic_classification,
     score_enriched_candidates,
+    verify_cache_reuse,
 )
 
 
@@ -122,6 +123,15 @@ with st.sidebar:
         st.session_state["last_action"] = " | ".join(result.message for result in results)
         for result in results:
             st.success(result.message)
+
+    if st.button("Verify cache reuse", width="stretch"):
+        with st.spinner("Checking SQLite cache reuse..."):
+            result = verify_cache_reuse(conn, settings)
+        st.session_state["last_action"] = result.message
+        if result.counts.get("verified"):
+            st.success(result.message)
+        else:
+            st.warning(result.message)
 
     st.header("Filters")
     startup_only = st.checkbox("Startup-likely only", value=False)

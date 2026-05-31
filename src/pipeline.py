@@ -61,7 +61,7 @@ def run_deterministic_classification(conn) -> PipelineResult:
             "deterministic_exclusion_reason": result.exclusion_reason,
             "deterministic_tags": json.dumps(result.tags),
         }
-        db.save_score(conn, company["id"], baseline_score(enriched_company), provider="baseline")
+        db.save_baseline_score_if_missing_or_baseline(conn, company["id"], baseline_score(enriched_company))
         candidates += 1 if result.is_candidate else 0
 
     db.finish_run(
@@ -95,47 +95,27 @@ def enrich_candidates(conn, settings: Settings, limit: int | None = None, force:
     calls = 0
     enriched = 0
     errors = 0
+    cache_hits = 0
 
     for company in companies:
-        try:
-            payload = client.search(company["canonical_name"])
-            enrichment = compact_tavily_response(company["id"], payload)
-            db.save_enrichment(conn, enrichment)
-            calls += 1
-            if enrichment["status"] == "success":
-                enriched += 1
-        except EnrichmentUnavailable:
-            raise
-        except Exception as exc:  # noqa: BLE001 - persist provider failure per company.
-            db.save_enrichment(
-                conn,
-                {
-                    "company_id": company["id"],
-                    "query": f'"{company["canonical_name"]}" company startup logistics supply chain commerce healthcare climate funding',
-                    "provider": "tavily",
-                    "raw_json": {},
-                    "top_titles": [],
-                    "top_urls": [],
-                    "top_snippets": [],
-                    "website": None,
-                    "status": "error",
-                    "error": str(exc),
-                },
-            )
-            calls += 1
-            errors += 1
+        result = _enrich_one_company(conn, settings, company, force=force, client=client)
+        calls += result["api_call"]
+        enriched += result["enriched"]
+        errors += result["error_count"]
+        cache_hits += result["cache_hit"]
 
     db.finish_run(
         conn,
         run_id,
         enriched_count=enriched,
         tavily_calls=calls,
+        cache_hits=cache_hits,
         notes=f"Errors: {errors}. Force refresh: {force}.",
     )
     return PipelineResult(
         "tavily_enrichment",
         f"Made {calls:,} Tavily calls and stored {enriched:,} successful enrichments.",
-        {"tavily_calls": calls, "enriched": enriched, "errors": errors},
+        {"tavily_calls": calls, "enriched": enriched, "errors": errors, "cache_hits": cache_hits},
     )
 
 
@@ -154,31 +134,207 @@ def score_enriched_candidates(conn, settings: Settings, limit: int | None = None
     calls = 0
     scored = 0
     errors = 0
+    cache_hits = 0
 
     for company in companies:
-        try:
-            score = classify_with_openai(company, settings.openai_api_key, settings.openai_model)
-            db.save_score(conn, company["id"], score, provider="openai")
-            calls += 1
-            scored += 1
-        except Exception as exc:  # noqa: BLE001 - keep partial scoring runs usable.
-            fallback = baseline_score(company)
-            fallback["rationale"] = f"OpenAI scoring failed; baseline retained. Error: {str(exc)[:120]}"
-            db.save_score(conn, company["id"], fallback, provider="baseline")
-            calls += 1
-            errors += 1
+        result = _score_one_company(conn, settings, company, force=force)
+        calls += result["api_call"]
+        scored += result["scored"]
+        errors += result["error_count"]
+        cache_hits += result["cache_hit"]
 
     db.finish_run(
         conn,
         run_id,
         scored_count=scored,
         openai_calls=calls,
+        cache_hits=cache_hits,
         notes=f"Errors: {errors}. Force refresh: {force}. Model: {settings.openai_model}.",
     )
     return PipelineResult(
         "openai_scoring",
         f"Made {calls:,} OpenAI calls and stored {scored:,} structured scores.",
-        {"openai_calls": calls, "scored": scored, "errors": errors},
+        {"openai_calls": calls, "scored": scored, "errors": errors, "cache_hits": cache_hits},
+    )
+
+
+def _enrich_one_company(
+    conn,
+    settings: Settings,
+    company: dict[str, Any],
+    *,
+    force: bool = False,
+    client: TavilyClient | None = None,
+) -> dict[str, Any]:
+    if not force:
+        cached = db.get_successful_enrichment(conn, company["id"], provider="tavily")
+        if cached:
+            return {
+                "api_call": 0,
+                "cache_hit": 1,
+                "enriched": 1,
+                "error_count": 0,
+                "status": "cache_hit",
+                "company_name": company["canonical_name"],
+            }
+
+    if client is None:
+        if not settings.tavily_api_key:
+            return {
+                "api_call": 0,
+                "cache_hit": 0,
+                "enriched": 0,
+                "error_count": 1,
+                "status": "missing_api_key",
+                "company_name": company["canonical_name"],
+            }
+        client = TavilyClient(settings.tavily_api_key, settings.tavily_max_results)
+
+    try:
+        payload = client.search(company["canonical_name"])
+        enrichment = compact_tavily_response(company["id"], payload)
+        db.save_enrichment(conn, enrichment)
+        return {
+            "api_call": 1,
+            "cache_hit": 0,
+            "enriched": 1 if enrichment["status"] == "success" else 0,
+            "error_count": 0 if enrichment["status"] == "success" else 1,
+            "status": enrichment["status"],
+            "company_name": company["canonical_name"],
+        }
+    except EnrichmentUnavailable:
+        raise
+    except Exception as exc:  # noqa: BLE001 - persist provider failure per company.
+        db.save_enrichment(
+            conn,
+            {
+                "company_id": company["id"],
+                "query": f'"{company["canonical_name"]}" company startup logistics supply chain commerce healthcare climate funding',
+                "provider": "tavily",
+                "raw_json": {},
+                "top_titles": [],
+                "top_urls": [],
+                "top_snippets": [],
+                "website": None,
+                "status": "error",
+                "error": str(exc),
+            },
+        )
+        return {
+            "api_call": 1,
+            "cache_hit": 0,
+            "enriched": 0,
+            "error_count": 1,
+            "status": "error",
+            "company_name": company["canonical_name"],
+        }
+
+
+def _score_one_company(
+    conn,
+    settings: Settings,
+    company: dict[str, Any],
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    if not force:
+        cached = db.get_score(conn, company["id"], provider="openai")
+        if cached:
+            return {
+                "api_call": 0,
+                "cache_hit": 1,
+                "scored": 1,
+                "error_count": 0,
+                "status": "cache_hit",
+                "company_name": company["canonical_name"],
+            }
+
+    if not settings.openai_api_key:
+        return {
+            "api_call": 0,
+            "cache_hit": 0,
+            "scored": 0,
+            "error_count": 1,
+            "status": "missing_api_key",
+            "company_name": company["canonical_name"],
+        }
+
+    try:
+        score = classify_with_openai(company, settings.openai_api_key, settings.openai_model)
+        db.save_score(conn, company["id"], score, provider="openai")
+        return {
+            "api_call": 1,
+            "cache_hit": 0,
+            "scored": 1,
+            "error_count": 0,
+            "status": "success",
+            "company_name": company["canonical_name"],
+        }
+    except Exception as exc:  # noqa: BLE001 - keep partial scoring runs usable.
+        fallback = baseline_score(company)
+        fallback["rationale"] = f"OpenAI scoring failed; baseline retained. Error: {str(exc)[:120]}"
+        db.save_score(conn, company["id"], fallback, provider="baseline")
+        return {
+            "api_call": 1,
+            "cache_hit": 0,
+            "scored": 0,
+            "error_count": 1,
+            "status": "error",
+            "company_name": company["canonical_name"],
+        }
+
+
+def verify_cache_reuse(conn, settings: Settings) -> PipelineResult:
+    run_id = db.start_run(conn, "cache_verification")
+    company = db.cached_company_for_verification(conn)
+    if company is None:
+        message = "No cached company available yet. First run a small Tavily enrichment and OpenAI scoring pass."
+        db.finish_run(conn, run_id, cache_hits=0, tavily_calls=0, openai_calls=0, notes=message)
+        return PipelineResult(
+            "cache_verification",
+            message,
+            {"verified": False, "cache_hits": 0, "tavily_calls": 0, "openai_calls": 0},
+        )
+
+    enrichment_result = _enrich_one_company(conn, settings, company, force=False)
+    score_result = _score_one_company(conn, settings, company, force=False)
+    cache_hits = enrichment_result["cache_hit"] + score_result["cache_hit"]
+    tavily_calls = enrichment_result["api_call"]
+    openai_calls = score_result["api_call"]
+    verified = cache_hits == 2 and tavily_calls == 0 and openai_calls == 0
+
+    db.finish_run(
+        conn,
+        run_id,
+        enriched_count=1 if enrichment_result["cache_hit"] else 0,
+        scored_count=1 if score_result["cache_hit"] else 0,
+        tavily_calls=tavily_calls,
+        openai_calls=openai_calls,
+        cache_hits=cache_hits,
+        notes=f"Verified={verified}; company={company['canonical_name']}; force_refresh=False.",
+    )
+
+    if verified:
+        message = (
+            f"Cache verified: reused stored enrichment and scoring for {company['canonical_name']}. "
+            "No paid Tavily/OpenAI calls were made."
+        )
+    else:
+        message = (
+            f"Cache verification failed for {company['canonical_name']}: expected 2 cache hits and 0 paid calls, "
+            f"got {cache_hits} cache hits, {tavily_calls} Tavily calls, and {openai_calls} OpenAI calls."
+        )
+
+    return PipelineResult(
+        "cache_verification",
+        message,
+        {
+            "verified": verified,
+            "company": company["canonical_name"],
+            "cache_hits": cache_hits,
+            "tavily_calls": tavily_calls,
+            "openai_calls": openai_calls,
+        },
     )
 
 

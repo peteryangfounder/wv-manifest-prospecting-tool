@@ -122,6 +122,17 @@ python scripts/run_pipeline.py --score --max-score 25
 - The deterministic baseline gives a ranked full-list view even before API keys are configured.
 - A force-refresh checkbox exists, but normal reruns reuse cached rows.
 
+### Reviewer Cache Verification
+
+To prove reruns do not redo paid work:
+
+1. Run a small Tavily enrichment pass, for example with `Max Tavily enrichments = 1`.
+2. Run a small OpenAI scoring pass, for example with `Max OpenAI scores = 1`.
+3. Click **Verify cache reuse** in the sidebar.
+4. Confirm the success message says the stored enrichment and scoring were reused and that the dashboard shows `Cache hits` increased while `Last API calls` remains `0`.
+
+The normal enrichment and scoring buttons still process the next unprocessed candidate. The verification button intentionally picks one company that already has both cached Tavily and OpenAI records, reruns that exact company's enrichment/scoring path with `force_refresh=False`, and records the result in the `runs` table.
+
 ## Scoring
 
 The score is capped at 100:
