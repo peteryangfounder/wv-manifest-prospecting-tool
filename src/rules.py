@@ -75,6 +75,25 @@ SELF_OR_RELATED = {
     "wittington",
 }
 
+GENERIC_PLACEHOLDER_NAMES = {
+    "ai startup",
+    "startup",
+    "start up",
+    "stealth",
+    "stealth startup",
+    "tbd",
+    "to be determined",
+    "student",
+    "coo",
+    "ceo",
+    "founder",
+    "n a",
+    "na",
+    "none",
+    "unknown",
+    "test",
+}
+
 INVESTOR_KEYWORDS = (
     "ventures",
     "venture",
@@ -337,8 +356,8 @@ def classify_company_name(raw_name: str) -> RuleResult:
     has_logistics = _has_any(text, LOGISTICS_SERVICE_KEYWORDS)
     has_tech = has_tech or _has_ai_brand_signal(raw_name, normalized)
 
-    if len(normalized) < 2 or normalized in {"na", "none", "unknown", "test"}:
-        return RuleResult("duplicate_or_noisy_entry", False, False, "Noisy or incomplete attendee entry.", tags)
+    if len(normalized) < 2 or normalized in GENERIC_PLACEHOLDER_NAMES:
+        return RuleResult("duplicate_or_noisy_entry", False, False, "Generic, placeholder, or incomplete attendee entry.", tags)
 
     if normalized in SELF_OR_RELATED:
         return RuleResult("duplicate_or_noisy_entry", False, False, "Wittington-related entry, not a prospect.", tags)

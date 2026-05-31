@@ -17,6 +17,7 @@ from src.pipeline import (
     score_enriched_candidates,
     verify_cache_reuse,
 )
+from src.view_model import VERIFIED_EMPTY_STATE, add_review_metadata, verified_top_prospects
 
 
 st.set_page_config(
@@ -234,8 +235,7 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["confidence"] = frame["confidence"].fillna("low")
     frame["rationale"] = frame["rationale"].fillna("")
     frame["rationale_preview"] = frame["rationale"].apply(lambda value: _truncate(value, 95))
-    frame["rank"] = frame["total_score"].rank(method="first", ascending=False).astype(int)
-    return frame.sort_values(["total_score", "canonical_name"], ascending=[False, True])
+    return add_review_metadata(frame)
 
 
 def _render_metric_cards(cards: list[tuple[str, str, str]]) -> None:
@@ -258,7 +258,7 @@ def _score_band_frame(frame: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame({"Score band": labels, "Companies": [0] * len(labels)})
 
     bands = pd.cut(
-        frame["total_score"],
+        frame["display_score"],
         bins=[0, 20, 40, 60, 80, 101],
         labels=labels,
         right=False,
@@ -444,7 +444,7 @@ if last_action:
 if frame.empty:
     st.warning("No companies loaded yet. Use Load Manifest list in the sidebar to start.")
 else:
-    filtered = frame[frame["total_score"] >= min_score].copy()
+    filtered = frame[frame["display_score"] >= min_score].copy()
     if startup_only:
         filtered = filtered[filtered["is_startup_likely"] == 1]
     if priority_only:
@@ -487,20 +487,24 @@ else:
         lower_cols[0].markdown("<div class='section-label'>Company types</div>", unsafe_allow_html=True)
         lower_cols[0].bar_chart(_type_frame(filtered), x="Type", y="Companies", height=220)
 
-        top_prospects = filtered.head(10).copy()
+        top_prospects = verified_top_prospects(filtered, limit=10)
         lower_cols[1].markdown("<div class='section-label'>Top prospects</div>", unsafe_allow_html=True)
-        lower_cols[1].dataframe(
-            top_prospects[["rank", "canonical_name", "total_score", "company_type", "confidence"]],
-            width="stretch",
-            hide_index=True,
-            column_config={
-                "rank": st.column_config.NumberColumn("Rank", width="small"),
-                "canonical_name": st.column_config.TextColumn("Company", width="medium"),
-                "total_score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100),
-                "company_type": st.column_config.TextColumn("Type"),
-                "confidence": st.column_config.TextColumn("Confidence"),
-            },
-        )
+        if top_prospects.empty:
+            lower_cols[1].info(VERIFIED_EMPTY_STATE)
+        else:
+            lower_cols[1].dataframe(
+                top_prospects[["rank", "canonical_name", "display_score", "company_type", "evidence_status", "confidence"]],
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "rank": st.column_config.NumberColumn("Rank", width="small"),
+                    "canonical_name": st.column_config.TextColumn("Company", width="medium"),
+                    "display_score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100),
+                    "company_type": st.column_config.TextColumn("Type"),
+                    "evidence_status": st.column_config.TextColumn("Evidence"),
+                    "confidence": st.column_config.TextColumn("Confidence"),
+                },
+            )
 
     with pipeline_tab:
         st.markdown("<div class='section-label'>Ranked pipeline</div>", unsafe_allow_html=True)
@@ -512,7 +516,9 @@ else:
         display_columns = [
             "rank",
             "canonical_name",
-            "total_score",
+            "display_score",
+            "evidence_status",
+            "cache_status",
             "company_type",
             "is_startup_likely",
             "high_priority_enrichment",
@@ -528,7 +534,9 @@ else:
             column_config={
                 "rank": st.column_config.NumberColumn("Rank", width="small"),
                 "canonical_name": st.column_config.TextColumn("Company", width="medium"),
-                "total_score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100),
+                "display_score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100),
+                "evidence_status": st.column_config.TextColumn("Evidence"),
+                "cache_status": st.column_config.TextColumn("Cache"),
                 "company_type": st.column_config.TextColumn("Type"),
                 "is_startup_likely": st.column_config.CheckboxColumn("Startup"),
                 "high_priority_enrichment": st.column_config.CheckboxColumn("Priority"),
@@ -539,7 +547,7 @@ else:
             },
         )
 
-        csv = filtered[display_columns + ["rationale", "source_urls", "evidence_summary"]].to_csv(index=False)
+        csv = filtered[display_columns + ["total_score", "rationale", "source_urls", "evidence_summary"]].to_csv(index=False)
         st.download_button(
             "Download filtered CSV",
             data=csv,
@@ -556,14 +564,24 @@ else:
             selected_row = filtered[filtered["canonical_name"] == selected_company].iloc[0]
 
             detail_cols = st.columns(4)
-            detail_cols[0].metric("Score", f"{int(selected_row['total_score'])}/100")
-            detail_cols[1].metric("WV edge", f"{int(selected_row['wittington_edge'])}/20")
-            detail_cols[2].metric("Type", str(selected_row.get("company_type") or "unknown"))
+            detail_cols[0].metric("Score", f"{int(selected_row['display_score'])}/100")
+            detail_cols[1].metric("Evidence", str(selected_row.get("evidence_status") or "Baseline only"))
+            detail_cols[2].metric("Cache", str(selected_row.get("cache_status") or "Not cached"))
             detail_cols[3].metric("Confidence", str(selected_row.get("confidence") or "low"))
+
+            evidence_status = str(selected_row.get("evidence_status") or "Baseline only")
+            if evidence_status == "Baseline only":
+                status_text = "Unverified baseline: this company has no cached Tavily evidence or OpenAI score yet. Treat it as a screening row, not an investment prospect."
+            elif evidence_status == "Enriched":
+                status_text = "Enriched: Tavily evidence is cached, but OpenAI scoring has not been run yet."
+            else:
+                status_text = "OpenAI scored: Tavily evidence and structured scoring are cached."
 
             st.markdown(
                 "<div class='detail-box'>"
                 f"<div class='detail-title'>{html.escape(selected_row['canonical_name'])}</div>"
+                f"<div class='detail-text'><strong>Status:</strong> {html.escape(status_text)}</div>"
+                f"<div class='detail-text'><strong>Type:</strong> {html.escape(str(selected_row.get('company_type') or 'unknown'))}</div>"
                 f"<div class='detail-text'><strong>Rationale:</strong> {html.escape(selected_row.get('rationale') or 'No rationale yet.')}</div>"
                 f"<div class='detail-text'><strong>Evidence summary:</strong> {html.escape(selected_row.get('evidence_summary') or 'No evidence yet.')}</div>"
                 "</div>",

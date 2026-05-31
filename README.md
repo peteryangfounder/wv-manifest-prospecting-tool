@@ -13,6 +13,7 @@ The product thesis is simple: use code for retrieval and storage, use determinis
 - Builds a stricter high-priority enrichment queue so paid API calls are not spent on every broad candidate.
 - Uses Tavily search as the external API enrichment layer for likely candidates.
 - Uses OpenAI for structured scoring only after Tavily evidence exists.
+- Separates baseline screening from verified prospects so un-enriched keyword matches are not presented as final investment-quality leads.
 - Presents a Streamlit dashboard with metrics, filters, source evidence, CSV export, and a sortable ranked table.
 
 ## Why This Architecture
@@ -108,13 +109,19 @@ python scripts/run_pipeline.py --score --max-score 25
 
 `src/clean.py` preserves the raw company name while creating a normalized key for deduplication. Legal suffixes like `Inc.`, `LLC`, and `Corporation` are removed only for dedupe.
 
-`src/rules.py` applies cheap classification before any paid API call. It excludes obvious non-targets such as large incumbents, investors, associations, universities, consultancies, pure carriers, ports, trucking firms, and logistics service providers without software/platform signals. It still ranks the full attendee list and preserves a broad candidate count, but paid enrichment defaults to a much stricter high-priority queue.
+`src/rules.py` applies cheap classification before any paid API call. It excludes obvious non-targets such as large incumbents, investors, associations, universities, consultancies, pure carriers, ports, trucking firms, and logistics service providers without software/platform signals. It also excludes generic placeholders and attendee-role entries such as `AI Startup`, `Startup`, `Stealth Company`, `TBD`, `Student`, `CEO`, `COO`, `Founder`, `N/A`, and `Unknown`. It still ranks the full attendee list and preserves a broad candidate count, but paid enrichment defaults to a much stricter high-priority queue.
 
 The high-priority queue requires stronger startup or technology evidence: AI, robotics, SaaS, software, automation, platform, analytics, visibility, autonomous systems, optimization, warehouse automation, standalone WMS/TMS signals, retail infrastructure, healthcare operations, climate/sustainability, supply-chain technology, or startup-like evidence such as `.ai` branding. This keeps the workflow cost-aware while still allowing the dashboard to display the whole universe.
 
 `src/enrich.py` calls Tavily with a compact company-search query and stores titles, URLs, snippets, and raw JSON in SQLite.
 
 `src/classify.py` sends only compact evidence to OpenAI. The model returns structured JSON with company type, startup likelihood, sector tags, Wittington edge, score components, confidence, rationale, and evidence summary.
+
+## Baseline Versus Verified Prospects
+
+The app intentionally distinguishes the full-list baseline screen from evidence-backed prospect ranking. Baseline-only rows remain visible in the ranked pipeline as `Baseline only` / `Not cached`, and their displayed score is capped so keyword-only matches do not outrank companies with real evidence.
+
+The Overview `Top prospects` table only shows verified prospects: companies with cached Tavily enrichment and cached OpenAI scoring. If no such rows exist yet, the app shows an empty state asking the reviewer to run enrichment and scoring rather than presenting low-confidence baseline rows as investment-ready leads.
 
 ## Caching And Cost Control
 
@@ -124,7 +131,7 @@ The high-priority queue requires stronger startup or technology evidence: AI, ro
 - OpenAI scores are keyed by company and marked with provider `openai`.
 - Paid Tavily/OpenAI runs default to the high-priority queue, not the broader candidate pool.
 - The UI defaults to bounded `MAX_ENRICH` and `MAX_SCORE` values.
-- The deterministic baseline gives a ranked full-list view even before API keys are configured.
+- The deterministic baseline gives a full-list screening view even before API keys are configured, but the Overview top-prospect list is reserved for evidence-backed Tavily/OpenAI results.
 - A force-refresh checkbox exists, but normal reruns reuse cached rows.
 
 ### Reviewer Cache Verification

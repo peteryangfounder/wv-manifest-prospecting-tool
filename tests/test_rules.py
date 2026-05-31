@@ -68,3 +68,24 @@ def test_likely_tech_startups_enter_high_priority_queue() -> None:
         result = classify_company_name(name)
         assert result.is_candidate is True, name
         assert result.high_priority_enrichment is True, name
+
+
+def test_generic_placeholders_are_not_high_priority() -> None:
+    names = [
+        "AI Startup",
+        "Startup",
+        "Stealth Company",
+        "TBD",
+        "Student",
+        "COO",
+        "CEO",
+        "Founder",
+        "N/A",
+        "Unknown",
+    ]
+
+    for name in names:
+        result = classify_company_name(name)
+        assert result.deterministic_type == "duplicate_or_noisy_entry", name
+        assert result.is_candidate is False, name
+        assert result.high_priority_enrichment is False, name
