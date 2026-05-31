@@ -84,10 +84,11 @@ streamlit run app.py
 
 Then use the sidebar in this order:
 
-1. Scrape/load Manifest list
-2. Run deterministic classification
-3. Enrich candidates with Tavily
-4. Score enriched candidates with OpenAI
+1. **Load & classify companies** - scrapes/parses the Manifest list and builds the high-priority queue with no paid API calls.
+2. **Generate verified prospects** - runs Tavily enrichment and OpenAI scoring for the high-priority queue using the configured limits.
+3. **Verify cache reuse** - proves cached Tavily/OpenAI records are reused without repeat paid calls.
+
+The old individual stage buttons are still available under **Advanced controls** for debugging or partial reruns.
 
 For a command-line run:
 

@@ -5,7 +5,7 @@ from typing import Any
 import pandas as pd
 
 
-VERIFIED_EMPTY_STATE = "No verified prospects yet. Run Tavily enrichment and OpenAI scoring to generate evidence-backed rankings."
+VERIFIED_EMPTY_STATE = "No verified prospects yet. Run 'Generate verified prospects' to enrich and score high-priority companies."
 
 
 def _is_successful_enrichment(row: dict[str, Any] | pd.Series) -> bool:

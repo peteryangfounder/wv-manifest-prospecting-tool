@@ -346,3 +346,20 @@ def run_default_pipeline(conn, settings: Settings) -> list[PipelineResult]:
     results.append(enrich_candidates(conn, settings, settings.max_enrich))
     results.append(score_enriched_candidates(conn, settings, settings.max_score))
     return results
+
+
+def load_and_classify_companies(conn, settings: Settings) -> list[PipelineResult]:
+    return [load_attendees(conn, settings), run_deterministic_classification(conn)]
+
+
+def generate_verified_prospects(
+    conn,
+    settings: Settings,
+    enrich_limit: int | None = None,
+    score_limit: int | None = None,
+    force: bool = False,
+) -> list[PipelineResult]:
+    return [
+        enrich_candidates(conn, settings, enrich_limit or settings.max_enrich, force=force),
+        score_enriched_candidates(conn, settings, score_limit or settings.max_score, force=force),
+    ]
