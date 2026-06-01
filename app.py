@@ -1009,9 +1009,6 @@ with st.sidebar:
                 result = verify_cache_reuse(conn, settings)
             level = "success" if result.counts.get("verified") else "warning"
             st.session_state["last_action"] = {"message": result.message, "level": level}
-        if st.button("Create missing SQLite tables", use_container_width=True):
-            db.init_db(conn)
-            st.session_state["last_action"] = {"message": "SQLite schema checked and missing tables/columns were created.", "level": "success"}
 
 st.markdown(
     """
