@@ -37,7 +37,7 @@ def load_attendees(conn, settings: Settings) -> PipelineResult:
         run_id,
         raw_count=len(raw_names),
         unique_count=unique_count,
-        notes=f"Source: {metadata.get('source')}; live_error={metadata.get('live_error', '')}",
+        notes=f"Source: {metadata.get('source')}. live_error={metadata.get('live_error', '')}",
     )
     return PipelineResult(
         "load_attendees",
@@ -79,11 +79,11 @@ def run_deterministic_classification(conn) -> PipelineResult:
         unique_count=len(companies),
         candidates_count=candidates,
         scored_count=len(companies),
-        notes=f"Baseline deterministic scores created for the full attendee list; high_priority_queue={high_priority}.",
+        notes=f"Baseline deterministic scores created for the full attendee list. high_priority_queue={high_priority}.",
     )
     return PipelineResult(
         "deterministic_classification",
-        f"Classified {len(companies):,} companies; {candidates:,} broad candidates; {high_priority:,} high-priority for paid enrichment.",
+        f"Classified {len(companies):,} companies. {candidates:,} broad candidates. {high_priority:,} high-priority for paid enrichment.",
         {"companies": len(companies), "candidates": candidates, "high_priority_queue": high_priority},
     )
 
@@ -359,7 +359,7 @@ def _score_one_company(
         }
     except Exception as exc:  # noqa: BLE001 - keep partial scoring runs usable.
         fallback = baseline_score(company)
-        fallback["rationale"] = f"OpenAI scoring failed; baseline retained. Error: {str(exc)[:120]}"
+        fallback["rationale"] = f"OpenAI scoring failed. Baseline retained. Error: {str(exc)[:120]}"
         db.save_score(conn, company["id"], fallback, provider="baseline")
         return {
             "api_call": 1,
@@ -402,7 +402,7 @@ def verify_cache_reuse(conn, settings: Settings) -> PipelineResult:
         tavily_calls=tavily_calls,
         openai_calls=openai_calls,
         cache_hits=cache_hits,
-        notes=f"Verified={verified}; company={company['canonical_name']}; force_refresh=False.",
+        notes=f"Verified={verified}. company={company['canonical_name']}. force_refresh=False.",
     )
 
     if verified:

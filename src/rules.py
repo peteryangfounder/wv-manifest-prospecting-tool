@@ -412,7 +412,7 @@ def classify_company_name(raw_name: str) -> RuleResult:
             "logistics_service_provider",
             False,
             False,
-            "Likely logistics services provider; no obvious software or platform signal.",
+            "Likely logistics services provider. No obvious software or platform signal.",
             tags or ["logistics"],
         )
 

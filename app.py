@@ -4,7 +4,6 @@ import html
 import json
 from collections import Counter
 from dataclasses import replace
-from urllib.parse import quote_plus
 
 import altair as alt
 import pandas as pd
@@ -17,7 +16,6 @@ from src.pipeline import (
     load_attendees,
     run_deterministic_classification,
     score_enriched_candidates,
-    verify_cache_reuse,
 )
 
 
@@ -206,8 +204,8 @@ CUSTOM_CSS = """
     padding: 0.72rem 0.8rem;
   }
   .step-row.active {
-    background: #fff4f4;
-    border-color: #ff4b4b;
+    background: #f0f6ff;
+    border-color: #2f6fed;
   }
   .step-row.complete {
     background: #f1fbf5;
@@ -230,7 +228,7 @@ CUSTOM_CSS = """
     background: #16823d;
   }
   .step-row.active .step-number {
-    background: #ff4b4b;
+    background: #2f6fed;
   }
   .step-label {
     color: #202332;
@@ -255,6 +253,19 @@ CUSTOM_CSS = """
     color: #ffffff !important;
     font-weight: 760 !important;
   }
+  .stButton > button[kind="primary"],
+  .stButton > button[data-testid="baseButton-primary"] {
+    background: #202332 !important;
+    border-color: #202332 !important;
+    color: #ffffff !important;
+    font-weight: 760 !important;
+  }
+  .stButton > button[kind="primary"]:hover,
+  .stButton > button[data-testid="baseButton-primary"]:hover {
+    background: #111827 !important;
+    border-color: #111827 !important;
+    color: #ffffff !important;
+  }
   .run-settings {
     background: #f8fafc;
     border: 1px solid #e6eaf1;
@@ -267,6 +278,38 @@ CUSTOM_CSS = """
     gap: 0.75rem;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     margin: 1rem 0 1.2rem 0;
+  }
+  .cost-hero {
+    background: #ffffff;
+    border: 1px solid #dfe5ee;
+    border-radius: 8px;
+    margin: 1rem 0;
+    padding: 1.05rem;
+  }
+  .cost-hero-title {
+    color: #202332;
+    font-size: 0.9rem;
+    font-weight: 760;
+    margin-bottom: 0.65rem;
+    text-transform: uppercase;
+  }
+  .cost-hero-grid {
+    display: grid;
+    gap: 0.8rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .cost-hero-label {
+    color: #697386;
+    font-size: 0.82rem;
+    line-height: 1.35;
+  }
+  .cost-hero-value {
+    color: #202332;
+    font-size: 1.35rem;
+    font-weight: 780;
+    line-height: 1.2;
+    margin-top: 0.18rem;
+    overflow-wrap: anywhere;
   }
   .summary-card {
     background: #ffffff;
@@ -420,7 +463,7 @@ CUSTOM_CSS = """
     overflow: hidden;
   }
   .score-fill {
-    background: #ff4b4b;
+    background: #1474c9;
     border-radius: inherit;
     display: block;
     height: 100%;
@@ -441,6 +484,9 @@ CUSTOM_CSS = """
   @media (max-width: 1100px) {
     .summary-grid {
       grid-template-columns: 1fr;
+    }
+    .cost-hero-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
   @media (max-width: 760px) {
@@ -469,6 +515,9 @@ CUSTOM_CSS = """
     .prospect-table th:nth-child(7),
     .prospect-table td:nth-child(7) {
       display: none;
+    }
+    .cost-hero-grid {
+      grid-template-columns: 1fr;
     }
   }
 </style>
@@ -525,6 +574,10 @@ def _humanize(value: str | None) -> str:
     return DISPLAY_LABELS.get(clean, clean.replace("_", " ").title())
 
 
+def _clean_ui_text(value: object) -> str:
+    return str(value or "").replace(chr(59), ",").replace(chr(8212), "-")
+
+
 def _normalized_display_name(value: str | None) -> str:
     return "".join(char.lower() if char.isalnum() else " " for char in str(value or "")).strip()
 
@@ -539,7 +592,7 @@ def _tag_pills(tags: list[str] | str | None) -> str:
     tags = tags or []
     if not tags:
         return "<span class='wv-pill'>None</span>"
-    return "".join(f"<span class='wv-pill'>{html.escape(_humanize(tag))}</span>" for tag in tags[:4])
+    return "".join(f"<span class='wv-pill'>{html.escape(_clean_ui_text(_humanize(tag)))}</span>" for tag in tags[:4])
 
 
 def _safe_link(url: str | None, label: str) -> str:
@@ -550,12 +603,16 @@ def _safe_link(url: str | None, label: str) -> str:
     return f"<a href='{html.escape(clean_url, quote=True)}' target='_blank' rel='noopener noreferrer'>{safe_label}</a>"
 
 
-def _company_url(row: pd.Series) -> str:
-    for column in ("website", "primary_source_url"):
-        value = str(row.get(column) or "").strip()
-        if value.startswith(("http://", "https://")):
-            return value
-    return f"https://www.google.com/search?q={quote_plus(str(row.get('canonical_name') or ''))}"
+def _reset_database(conn) -> None:
+    conn.executescript(
+        """
+        DELETE FROM scores;
+        DELETE FROM enrichments;
+        DELETE FROM companies;
+        DELETE FROM runs;
+        """
+    )
+    conn.commit()
 
 
 def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
@@ -603,9 +660,9 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
         frame.loc[placeholder_mask, "deterministic_type_display"] = _humanize("duplicate_or_noisy_entry")
         frame.loc[placeholder_mask, "is_refined_prospect"] = False
         frame.loc[placeholder_mask, "source_status"] = "Filtered out"
-        frame.loc[placeholder_mask, "rationale"] = "Filtered out: generic placeholder entry rather than a named company."
-    frame["rationale_preview"] = frame["rationale"].apply(lambda value: _truncate(value, 95))
-    frame["evidence_preview"] = frame["evidence_summary"].apply(lambda value: _truncate(value, 95))
+        frame.loc[placeholder_mask, "rationale"] = "Filtered out, generic placeholder entry rather than a named company."
+    frame["rationale_preview"] = frame["rationale"].apply(lambda value: _clean_ui_text(_truncate(value, 140)))
+    frame["evidence_preview"] = frame["evidence_summary"].apply(lambda value: _clean_ui_text(_truncate(value, 180)))
     return frame.sort_values(["total_score", "canonical_name"], ascending=[False, True]).reset_index(drop=True)
 
 
@@ -646,14 +703,50 @@ def _render_metric_cards(cards: list[tuple[str, str, str]]) -> None:
 
 
 def _render_summary_card(title: str, rows: list[tuple[str, str]]) -> None:
-    body = [f"<div class='summary-card'><div class='summary-title'>{html.escape(title)}</div>"]
+    body = [f"<div class='summary-card'><div class='summary-title'>{html.escape(_clean_ui_text(title))}</div>"]
     for label, value in rows:
         body.append(
             "<div class='summary-line'>"
-            f"<span class='summary-label'>{html.escape(label)}</span>"
-            f"<span class='summary-value'>{html.escape(value)}</span>"
+            f"<span class='summary-label'>{html.escape(_clean_ui_text(label))}</span>"
+            f"<span class='summary-value'>{html.escape(_clean_ui_text(value))}</span>"
             "</div>"
         )
+    body.append("</div>")
+    st.markdown("".join(body), unsafe_allow_html=True)
+
+
+def _render_cost_hero(
+    *,
+    lifetime_cost: float,
+    cost_per_verified: float,
+    total_tokens: int,
+    tavily_calls: int,
+    openai_calls: int,
+    last_api_calls: int,
+    last_run_cost: float,
+    model_name: str,
+) -> None:
+    items = [
+        ("Total tracked API spend", _format_currency(lifetime_cost)),
+        ("Average per API-scored company", _format_currency(cost_per_verified)),
+        ("OpenAI tokens tracked", _format_int(total_tokens)),
+        ("Tavily search calls", _format_int(tavily_calls)),
+        ("OpenAI scoring calls", _format_int(openai_calls)),
+        ("Last run", f"{_format_int(last_api_calls)} calls / {_format_currency(last_run_cost)}"),
+    ]
+    body = ["<div class='cost-hero'><div class='cost-hero-title'>API cost summary</div><div class='cost-hero-grid'>"]
+    for label, value in items:
+        body.append(
+            "<div>"
+            f"<div class='cost-hero-label'>{html.escape(_clean_ui_text(label))}</div>"
+            f"<div class='cost-hero-value'>{html.escape(_clean_ui_text(value))}</div>"
+            "</div>"
+        )
+    body.append("</div>")
+    body.append(
+        "<div class='quiet-note'>Tracked spend includes Tavily search calls plus OpenAI scoring tokens. "
+        f"Current OpenAI scoring model: {html.escape(_clean_ui_text(model_name))}</div>"
+    )
     body.append("</div>")
     st.markdown("".join(body), unsafe_allow_html=True)
 
@@ -851,10 +944,10 @@ def _table_html(frame: pd.DataFrame, columns: list[tuple[str, str, str]], empty_
 
     widths = {
         "rank": "7%",
-        "score": "18%",
-        "company": "22%",
-        "evidence": "28%",
-        "tags": "19%",
+        "score": "14%",
+        "company": "20%",
+        "evidence": "42%",
+        "tags": "16%",
     }
     table_kind = "source-table" if columns and columns[0][0] == "raw_name" else "prospect-table"
     body = [f"<table class='wv-table {table_kind}'><thead><tr>"]
@@ -868,7 +961,7 @@ def _table_html(frame: pd.DataFrame, columns: list[tuple[str, str, str]], empty_
         for key, _label, kind in columns:
             value = row.get(key)
             if kind == "company":
-                cell = _safe_link(_company_url(row), str(value or ""))
+                cell = html.escape(_clean_ui_text(value))
             elif kind == "score":
                 score = int(value or 0)
                 cell = (
@@ -882,13 +975,13 @@ def _table_html(frame: pd.DataFrame, columns: list[tuple[str, str, str]], empty_
             elif kind == "tags":
                 cell = _tag_pills(value)
             elif kind == "label":
-                cell = html.escape(_humanize(str(value or "")))
+                cell = html.escape(_clean_ui_text(_humanize(str(value or ""))))
             elif kind == "link":
                 cell = _safe_link(str(value or ""), "Open")
             elif kind == "number":
                 cell = _format_int(value)
             else:
-                cell = html.escape(str(value or ""))
+                cell = html.escape(_clean_ui_text(value))
             body.append(f"<td>{cell}</td>")
         body.append("</tr>")
     body.append("</tbody></table>")
@@ -1001,19 +1094,17 @@ with st.sidebar:
             selected_sectors = st.multiselect("Sector", all_sectors, default=[], format_func=_humanize)
             selected_confidence = st.multiselect("Confidence", confidence_options, default=[], format_func=_humanize)
 
-    with st.expander("Advanced maintenance", expanded=False):
-        st.caption("These controls are not part of the normal 1-2-3 workflow.")
-        force_refresh = st.checkbox(
-            "Ignore cache on next API run",
-            value=False,
-            key="force_refresh",
-            help="Normally off. Turn on only when you intentionally want to pay for fresh Tavily/OpenAI results.",
-        )
-        if st.button("Test cache reuse", use_container_width=True):
-            with st.spinner("Checking SQLite cache reuse..."):
-                result = verify_cache_reuse(conn, settings)
-            level = "success" if result.counts.get("verified") else "warning"
-            st.session_state["last_action"] = {"message": result.message, "level": level}
+    if st.button(
+        "Reset app data",
+        use_container_width=True,
+        help="Clear source rows, cached enrichments, scores, and run history so the workflow starts fresh.",
+    ):
+        _reset_database(conn)
+        st.session_state["last_action"] = {
+            "message": "App data reset. Start again with step 1.",
+            "level": "success",
+        }
+        st.rerun()
 
 st.markdown(
     """
@@ -1105,6 +1196,7 @@ if run_step == "source":
         "level": "success",
     }
     frame, metrics = _load_frame_and_metrics(conn)
+    st.rerun()
 
 if run_step == "verify":
     cap = int(prospect_cap)
@@ -1147,14 +1239,14 @@ if run_step == "verify":
         conn,
         runtime_settings,
         cap,
-        bool(st.session_state.get("force_refresh", False)),
+        False,
         progress_callback=enrichment_progress,
     )
     score_result = score_enriched_candidates(
         conn,
         runtime_settings,
         cap,
-        bool(st.session_state.get("force_refresh", False)),
+        False,
         progress_callback=scoring_progress,
     )
     progress.progress(1.0, text="Verification run finished.")
@@ -1164,11 +1256,12 @@ if run_step == "verify":
         "level": level,
     }
     frame, metrics = _load_frame_and_metrics(conn)
+    st.rerun()
 
 last_action = st.session_state.get("last_action")
 if last_action:
     level = html.escape(last_action.get("level", "info"))
-    message = html.escape(last_action.get("message", ""))
+    message = html.escape(_clean_ui_text(last_action.get("message", "")))
     st.markdown(f"<div class='status-strip {level}'>{message}</div>", unsafe_allow_html=True)
 
 weighted_frame = _apply_weighted_scores(frame, weights)
@@ -1194,26 +1287,36 @@ lifetime_api_calls = int(run_totals.get("tavily_calls") or 0) + int(run_totals.g
 lifetime_cost = float(run_totals.get("estimated_cost_usd") or 0)
 cost_per_verified = lifetime_cost / int(metrics["openai_scored"] or 1) if metrics.get("openai_scored") else 0
 
-summary_cols = st.columns(2)
+_render_cost_hero(
+    lifetime_cost=lifetime_cost,
+    cost_per_verified=cost_per_verified,
+    total_tokens=int(run_totals.get("total_tokens") or 0),
+    tavily_calls=int(run_totals.get("tavily_calls") or 0),
+    openai_calls=int(run_totals.get("openai_calls") or 0),
+    last_api_calls=last_api_calls,
+    last_run_cost=float(last_run.get("estimated_cost_usd") or 0),
+    model_name=str(runtime_settings.openai_model),
+)
+
+summary_cols = st.columns((1, 1))
 with summary_cols[0]:
     _render_summary_card(
-        "Pipeline status",
+        "Source and prospect status",
         [
             ("Source rows", f"{_format_int(metrics['raw_companies'])} raw / {_format_int(metrics['unique_companies'])} unique"),
-            ("Screened candidates", f"{_format_int(candidate_count)} ({_pct(candidate_count, metrics['unique_companies'])})"),
-            ("Evidence enriched", f"{_format_int(metrics['enriched'])} ({_pct(metrics['enriched'], candidate_count)})"),
-            ("Verified prospects", f"{_format_int(len(prospects))} shown / {_format_int(metrics['openai_scored'])} API-scored"),
+            ("Candidates after rule screen", f"{_format_int(candidate_count)} ({_pct(candidate_count, metrics['unique_companies'])})"),
+            ("API-scored companies", _format_int(metrics["openai_scored"])),
+            ("Verified prospects shown", _format_int(len(prospects))),
         ],
     )
 with summary_cols[1]:
     _render_summary_card(
-        "API usage and cost",
+        "Pricing assumptions",
         [
-            ("Current model", str(runtime_settings.openai_model)),
-            ("Model price estimate", f"${runtime_settings.openai_input_cost_per_1m_tokens:g} in / ${runtime_settings.openai_output_cost_per_1m_tokens:g} out per 1M tokens"),
-            ("Last run", f"{_format_int(last_api_calls)} calls / {_format_currency(last_run.get('estimated_cost_usd'))}"),
-            ("All tracked usage", f"{_format_int(run_totals.get('total_tokens'))} tokens / {_format_currency(lifetime_cost)}"),
-            ("Average per API-scored company", _format_currency(cost_per_verified)),
+            ("OpenAI model", str(runtime_settings.openai_model)),
+            ("OpenAI input", f"${runtime_settings.openai_input_cost_per_1m_tokens:g} per 1M tokens"),
+            ("OpenAI output", f"${runtime_settings.openai_output_cost_per_1m_tokens:g} per 1M tokens"),
+            ("Search API", f"${settings.tavily_cost_per_call_usd:g} per call"),
         ],
     )
 
@@ -1289,7 +1392,7 @@ else:
                 ("company_type_display", "Type", "text"),
                 ("confidence_display", "Confidence", "text"),
                 ("sector_tags", "Sectors", "tags"),
-                ("evidence_preview", "Evidence", "text"),
+                ("evidence_summary", "Evidence", "evidence"),
             ],
             "No externally verified prospects yet. Generate a capped batch to populate this list.",
         )
@@ -1358,8 +1461,7 @@ else:
                 ("company_type_display", "Type", "text"),
                 ("confidence_display", "Confidence", "text"),
                 ("sector_tags", "Sectors", "tags"),
-                ("wittington_edge", "WV edge", "number"),
-                ("evidence_preview", "Evidence", "text"),
+                ("evidence_summary", "Evidence", "evidence"),
             ],
             "No verified prospects match the current filters.",
         )
@@ -1417,13 +1519,12 @@ else:
             detail_cols[3].metric("Type", str(selected_row.get("company_type_display") or "Needs evidence"))
             detail_cols[4].metric("Confidence", str(selected_row.get("confidence_display") or "Low"))
 
-            website = _company_url(selected_row)
             st.markdown(
                 "<div class='detail-box'>"
-                f"<div class='detail-title'>{_safe_link(website, selected_row['canonical_name'])}</div>"
-                f"<div class='detail-text'><strong>Rule bucket:</strong> {html.escape(str(selected_row.get('deterministic_type_display') or ''))}</div>"
-                f"<div class='detail-text'><strong>Rationale:</strong> {html.escape(selected_row.get('rationale') or 'No rationale yet.')}</div>"
-                f"<div class='detail-text'><strong>Evidence:</strong> {html.escape(selected_row.get('evidence_summary') or 'No external evidence yet.')}</div>"
+                f"<div class='detail-title'>{html.escape(_clean_ui_text(selected_row['canonical_name']))}</div>"
+                f"<div class='detail-text'><strong>Rule bucket:</strong> {html.escape(_clean_ui_text(selected_row.get('deterministic_type_display') or ''))}</div>"
+                f"<div class='detail-text'><strong>Rationale:</strong> {html.escape(_clean_ui_text(selected_row.get('rationale') or 'No rationale yet.'))}</div>"
+                f"<div class='detail-text'><strong>Evidence:</strong> {html.escape(_clean_ui_text(selected_row.get('evidence_summary') or 'No external evidence yet.'))}</div>"
                 "</div>",
                 unsafe_allow_html=True,
             )

@@ -82,7 +82,7 @@ def baseline_score(company: dict[str, Any]) -> dict[str, Any]:
     )
 
     if deterministic_type == "likely_startup_or_tech":
-        rationale = "Potential fit: deterministic signals suggest a technology company; external evidence should confirm stage, product, and Wittington edge."
+        rationale = "Potential fit. Deterministic signals suggest a technology company. External evidence should confirm stage, product, and Wittington edge."
         company_type = "startup"
         startup_likely = 1
     elif deterministic_type == "unknown_needs_enrichment":
@@ -102,7 +102,7 @@ def baseline_score(company: dict[str, Any]) -> dict[str, Any]:
         **components,
         "total_score": capped_total,
         "rationale": rationale,
-        "evidence_summary": "Baseline deterministic screen only; no paid external evidence used.",
+        "evidence_summary": "Baseline deterministic screen only. No paid external evidence used.",
         "confidence": "low",
         "raw_json": {"provider": "baseline", "deterministic_type": deterministic_type},
     }

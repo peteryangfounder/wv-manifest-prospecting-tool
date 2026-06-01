@@ -1,50 +1,30 @@
 # Manifest Prospecting Tool
 
-Manifest Prospecting Tool is a small internal VC sourcing dashboard for Wittington Ventures. It turns the public Manifest attendee list into a raw source view plus a smaller refined prospect list backed by external evidence.
+Manifest Prospecting Tool is an internal VC sourcing dashboard for Wittington Ventures. It turns the public Manifest attendee list into two clear working views: a source list with cleaned attendee rows and a verified prospect list backed by external evidence.
 
-The product thesis is simple: use code for retrieval and storage, use deterministic rules to avoid wasting paid calls on obvious non-prospects, then use an LLM only for compact VC-style judgment once external evidence has been retrieved and cached.
+The product uses code for retrieval, storage, filtering, and cost control. It uses Tavily for external search evidence, then uses OpenAI for scoring after that evidence has been retrieved and cached.
 
-## What This Tool Does
+Hosted app: https://wv-manifest-prospecting-tool-b8jadagmhgsh8wirbknjb9.streamlit.app/
 
-- Scrapes `https://manife.st/who-attends/` and falls back to the included seed list if the live page changes or blocks scraping.
-- Parses, cleans, normalizes, and deduplicates messy attendee names.
-- Stores all companies, enrichments, scores, and run metadata in SQLite.
-- Runs cheap deterministic classification across the full list before paid enrichment.
-- Uses Tavily search as the external API enrichment layer for likely candidates.
-- Uses OpenAI for structured scoring only after Tavily evidence exists.
-- Presents a Streamlit dashboard with metrics, filters, source evidence, CSV export, a source list, and a verified prospect list.
+## Current App
 
-## Why This Architecture
-
-The assignment emphasizes repeatability, cost control, and smart use of AI. The pipeline is therefore staged:
-
-1. **Retrieve in code:** requests and BeautifulSoup fetch the attendee page; Tavily retrieves web evidence.
-2. **Cache everything:** SQLite prevents repeated scraping, search, or scoring work on reruns.
-3. **Filter before spend:** deterministic rules screen out incumbents, investors, media, universities, consultants, and plain service providers.
-4. **Use AI for judgment:** OpenAI receives only company name, deterministic tags, and top search snippets, then returns structured JSON.
-5. **Keep the UI simple:** Streamlit is enough for a reviewable internal workflow.
-
-## Assignment Checklist
-
-- Real working tool: `streamlit run app.py`
-- Scrape and parse Manifest attendee list: `src/scrape.py`
-- External API call: Tavily search in `src/enrich.py`
-- Queryable data layer: SQLite schema in `src/db.py`
-- Rerun cache: enrichments and scores are keyed by company/provider
-- Deterministic fit logic: `src/rules.py`
-- AI synthesis and scoring: `src/classify.py`
-- Wittington-specific scoring: encoded in `src/config.py` and scoring prompt
-- Source list and verified prospect views in `app.py`
-- Cost controls: max enrichment/scoring limits, cache checks, baseline dry mode
-- Future capabilities write-up: `FUTURE_CAPABILITIES.md`
-- Key decision note: `SUBMISSION_NOTE.md`
+- Guided Streamlit workflow with three steps: prepare source list, verify prospects, review results.
+- Source list view for the messy attendee data after cleaning, dedupe, and rule screening.
+- Verified prospects view for companies that passed evidence enrichment and API scoring.
+- Larger full-width charts with horizontal labels for readability.
+- Wider prospect evidence columns so company descriptions can be read without cramped table cells.
+- Prominent API cost summary that combines OpenAI token spend and Tavily search-call spend.
+- Model selector and batch cap for controlling how many companies get verified in each run.
+- Scoring weight controls for investor preference changes.
+- Simple reset button that clears local source rows, cached enrichments, scores, and run history.
+- CSV exports for source rows and verified prospects.
 
 ## Tech Stack
 
 - Python
 - Streamlit
 - SQLite
-- requests + BeautifulSoup
+- requests and BeautifulSoup
 - Tavily Search API
 - OpenAI API
 - pandas
@@ -69,9 +49,12 @@ MAX_ENRICH=75
 MAX_SCORE=75
 TAVILY_MAX_RESULTS=3
 DATABASE_PATH=data/prospects.db
+OPENAI_INPUT_COST_PER_1M_TOKENS=0.15
+OPENAI_OUTPUT_COST_PER_1M_TOKENS=0.60
+TAVILY_COST_PER_CALL_USD=0.001
 ```
 
-The app still opens without API keys and will produce deterministic baseline scores. To satisfy the external enrichment requirement in a real run, set `TAVILY_API_KEY`. To produce API-verified prospect scores, also set `OPENAI_API_KEY`.
+The app opens without API keys and can create baseline rule scores. Set `TAVILY_API_KEY` to retrieve external search evidence. Set `OPENAI_API_KEY` to generate API-scored verified prospects.
 
 ## Run Locally
 
@@ -79,12 +62,12 @@ The app still opens without API keys and will produce deterministic baseline sco
 streamlit run app.py
 ```
 
-Then use the sidebar in this order:
+Use the dashboard in this order:
 
-1. Scrape/load Manifest list
-2. Run deterministic classification
-3. Enrich candidates with Tavily
-4. Score enriched candidates with OpenAI
+1. Click **1. Load and screen source data**.
+2. Choose the number of companies to verify and the OpenAI model.
+3. Click **2. Verify prospects with APIs**.
+4. Review the Overview, Source list, Verified prospects, and Company detail tabs.
 
 For a command-line run:
 
@@ -102,55 +85,61 @@ python scripts/run_pipeline.py --score --max-score 25
 
 ## How The Pipeline Works
 
-`src/scrape.py` tries to scrape the live Manifest attendee page. If the live scrape returns too little data or fails, it loads `data/manifest_attendees_seed.txt`, which was created from the provided assignment attachment.
+`src/scrape.py` tries to scrape the live Manifest attendee page. If the live scrape returns too little data or fails, it loads `data/manifest_attendees_seed.txt`.
 
-`src/clean.py` preserves the raw company name while creating a normalized key for deduplication. Legal suffixes like `Inc.`, `LLC`, and `Corporation` are removed only for dedupe.
+`src/clean.py` preserves the raw company name while creating a normalized key for deduplication. Legal suffixes like `Inc.`, `LLC`, and `Corporation` are removed only for matching.
 
-`src/rules.py` applies cheap classification before any paid API call. It excludes obvious non-targets such as large incumbents, investors, associations, universities, consultancies, generic placeholders, and logistics service providers without software/platform signals. It keeps named tech companies and ambiguous entries as candidates for evidence checks.
+`src/rules.py` applies cheap classification before any paid API call. It filters obvious non-targets such as large incumbents, investors, associations, universities, consultancies, generic placeholders, and logistics service providers without software or platform signals.
 
-`src/enrich.py` calls Tavily with a compact company-search query and stores titles, URLs, snippets, and raw JSON in SQLite.
+`src/enrich.py` calls Tavily with a compact company-search query and stores titles, URLs, snippets, website hints, and raw JSON in SQLite.
 
-`src/classify.py` sends only compact evidence to OpenAI. The model returns structured JSON with company type, startup likelihood, sector tags, Wittington edge, score components, confidence, rationale, and evidence summary.
+`src/classify.py` sends compact evidence to OpenAI. The model returns structured JSON with company type, startup signal, sector tags, Wittington edge, score components, confidence, rationale, and evidence summary.
 
-## Caching And Cost Control
+`src/db.py` stores companies, enrichments, scores, and run metadata. The dashboard uses that run metadata for API-call counts, tokens, cache hits, and estimated spend.
+
+## Cost And Usage Tracking
+
+The dashboard tracks all metered providers currently used by the app:
+
+- Tavily search calls
+- OpenAI scoring calls
+- OpenAI input tokens
+- OpenAI output tokens
+- OpenAI total tokens
+- Estimated Tavily search spend
+- Estimated OpenAI model spend
+- Total tracked API spend
+- Average tracked spend per API-scored company
+
+The cost summary is an estimate based on configured model pricing and Tavily cost per call. SQLite stores every run so reruns can show cumulative usage and last-run usage.
+
+## Caching And Reset
 
 - The database is created automatically at `data/prospects.db`.
 - Company rows are keyed by normalized name.
-- Tavily enrichments are keyed by company/provider.
-- OpenAI scores are keyed by company and marked with provider `openai`.
-- The UI defaults to bounded `MAX_ENRICH` and `MAX_SCORE` values.
-- The deterministic baseline gives a screen score for the source list even before API keys are configured.
-- A force-refresh checkbox exists, but normal reruns reuse cached rows.
-
-### Reviewer Cache Verification
-
-To prove reruns do not redo paid work:
-
-1. Run a small Tavily enrichment pass, for example with `Max Tavily enrichments = 1`.
-2. Run a small OpenAI scoring pass, for example with `Max OpenAI scores = 1`.
-3. Click **Verify cache reuse** in the sidebar.
-4. Confirm the success message says the stored enrichment and scoring were reused and that the dashboard shows `Cache hits` increased while `Last API calls` remains `0`.
-
-The normal enrichment and scoring buttons still process the next unprocessed candidate. The verification button intentionally picks one company that already has both cached Tavily and OpenAI records, reruns that exact company's enrichment/scoring path with `force_refresh=False`, and records the result in the `runs` table.
+- Tavily enrichments are keyed by company and provider.
+- OpenAI scores are keyed by company and provider.
+- Normal reruns reuse cached rows and continue with the next unprocessed candidate.
+- The sidebar reset button clears local source rows, enrichments, scores, and run history when a clean slate is needed.
 
 ## Scoring
 
-The score is capped at 100:
+The weighted score is capped at 100:
 
-- Venture-backability: 25
+- Venture backability: 25
 - Wittington sector fit: 25
 - Wittington strategic edge: 20
 - Stage signal: 10
 - Traction signal: 10
-- Data confidence: 10
+- Evidence confidence: 10
 
-Caps prevent non-startups from floating to the top:
+Caps prevent non-startups from ranking highly:
 
 - Incumbents without strong startup evidence: max 35
 - Investors: max 25
-- Media, associations, universities, government: max 20
-- Plain service providers without software/platform evidence: max 45
-- No external evidence: max 50
+- Media, associations, universities, and government: max 20
+- Plain service providers without software or platform evidence: max 45
+- Rows without external evidence: max 50
 
 ## Deployment
 
@@ -166,16 +155,17 @@ Add the environment variables in Railway and deploy the repo.
 
 ### Streamlit Cloud
 
-Create a Streamlit Cloud app from this repository, set `app.py` as the entrypoint, and add the API keys under app secrets/environment variables.
+Create a Streamlit Cloud app from this repository, set `app.py` as the entrypoint, and add the API keys under app secrets or environment variables.
 
 ## Known Limitations
 
 - Tavily search can return ambiguous results for short or common company names.
-- Deterministic screening is intentionally conservative and may miss stealthy startups with generic names.
-- The seed attendee file is included for reliability, but the live scrape should be rerun before an interview demo.
+- Deterministic screening is conservative and may miss stealth startups with generic names.
+- The seed attendee file is included for reliability, but the live scrape should be rerun before a demo.
 - Funding stage is inferred from public snippets unless a richer company-data API is added.
-- OpenAI scoring is only as good as the retrieved evidence; thin evidence is marked low confidence.
+- OpenAI scoring depends on retrieved evidence quality, so thin evidence is marked low confidence.
 
-## Future Improvements
+## Related Notes
 
-See `FUTURE_CAPABILITIES.md`.
+- Key decision note: `SUBMISSION_NOTE.md`
+- Future capabilities: `FUTURE_CAPABILITIES.md`
