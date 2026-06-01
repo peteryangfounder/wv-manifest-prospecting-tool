@@ -808,7 +808,7 @@ def _horizontal_bar_chart(
 ) -> alt.Chart:
     frame = frame.copy()
     row_count = max(1, len(frame))
-    chart_height = max(height, row_count * 36)
+    chart_height = max(height, row_count * 46)
     max_value = float(frame[value].max() or 0) if value in frame else 0
     domain_max = max(1.0, max_value * 1.18)
     base = alt.Chart(frame).encode(
@@ -816,7 +816,7 @@ def _horizontal_bar_chart(
             f"{category}:N",
             sort=sort,
             title=None,
-            axis=alt.Axis(labelAngle=0, labelLimit=220, labelPadding=8),
+            axis=alt.Axis(labelAngle=0, labelLimit=320, labelPadding=12),
         ),
         x=alt.X(
             f"{value}:Q",
@@ -829,15 +829,20 @@ def _horizontal_bar_chart(
             alt.Tooltip(f"{value}:Q", title=value, format=",.4f"),
         ],
     )
-    bars = base.mark_bar(color="#1474c9", cornerRadiusEnd=3)
+    bars = base.mark_bar(color="#1474c9", cornerRadiusEnd=4, size=26)
     labels = base.mark_text(
         align="left",
         baseline="middle",
-        dx=5,
+        dx=8,
         color="#313647",
-        fontSize=12,
+        fontSize=13,
     ).encode(text=alt.Text(f"{value}:Q", format=",.0f"))
-    return (bars + labels).properties(height=chart_height).configure_axis(labelFontSize=12, titleFontSize=12)
+    return (
+        (bars + labels)
+        .properties(height=chart_height)
+        .configure_axis(labelFontSize=13, titleFontSize=13)
+        .configure_view(stroke=None)
+    )
 
 
 def _table_html(frame: pd.DataFrame, columns: list[tuple[str, str, str]], empty_message: str) -> str:
@@ -1220,8 +1225,6 @@ else:
     )
 
     with overview_tab:
-        chart_cols = st.columns((1.15, 1, 1))
-
         funnel_df = pd.DataFrame(
             {
                 "Stage": ["Unique names", "Screened candidates", "Evidence enriched", "API-scored"],
@@ -1233,37 +1236,48 @@ else:
                 ],
             }
         )
-        chart_cols[0].markdown("<div class='section-label'>Source to prospects</div>", unsafe_allow_html=True)
-        chart_cols[0].altair_chart(
-            _horizontal_bar_chart(funnel_df, "Stage", "Companies", height=230, sort=None),
+        st.markdown("<div class='section-label'>Source to prospects</div>", unsafe_allow_html=True)
+        st.altair_chart(
+            _horizontal_bar_chart(funnel_df, "Stage", "Companies", height=320, sort=None),
             use_container_width=True,
         )
+        st.divider()
 
-        chart_cols[1].markdown("<div class='section-label'>Fit score distribution</div>", unsafe_allow_html=True)
-        chart_cols[1].altair_chart(
-            _horizontal_bar_chart(_score_band_frame(weighted_frame), "Score band", "Companies", height=230, sort=None),
+        st.markdown("<div class='section-label'>Fit score distribution</div>", unsafe_allow_html=True)
+        st.altair_chart(
+            _horizontal_bar_chart(_score_band_frame(weighted_frame), "Score band", "Companies", height=340, sort=None),
             use_container_width=True,
         )
+        st.divider()
 
-        chart_cols[2].markdown("<div class='section-label'>Sector mix</div>", unsafe_allow_html=True)
-        chart_cols[2].altair_chart(_pie_chart(_sector_frame(weighted_frame), "Sector", "Companies"), use_container_width=True)
-
-        lower_cols = st.columns((1, 1, 1))
-        lower_cols[0].markdown("<div class='section-label'>Company types</div>", unsafe_allow_html=True)
-        lower_cols[0].altair_chart(_pie_chart(_type_frame(weighted_frame), "Type", "Companies"), use_container_width=True)
-
-        lower_cols[1].markdown("<div class='section-label'>Estimated API spend</div>", unsafe_allow_html=True)
-        lower_cols[1].altair_chart(
-            _pie_chart(_resource_cost_frame(metrics, settings), "Resource", "Estimated USD"),
+        st.markdown("<div class='section-label'>Sector mix</div>", unsafe_allow_html=True)
+        st.altair_chart(
+            _horizontal_bar_chart(_sector_frame(weighted_frame), "Sector", "Companies", height=380),
             use_container_width=True,
         )
+        st.divider()
+
+        st.markdown("<div class='section-label'>Company types</div>", unsafe_allow_html=True)
+        st.altair_chart(
+            _horizontal_bar_chart(_type_frame(weighted_frame), "Type", "Companies", height=320),
+            use_container_width=True,
+        )
+        st.divider()
+
+        st.markdown("<div class='section-label'>Estimated API spend</div>", unsafe_allow_html=True)
+        st.altair_chart(
+            _horizontal_bar_chart(_resource_cost_frame(metrics, settings), "Resource", "Estimated USD", height=220),
+            use_container_width=True,
+        )
+        st.divider()
 
         cost_stage_df = _stage_cost_frame(metrics, settings)
-        lower_cols[2].markdown("<div class='section-label'>Cost by stage</div>", unsafe_allow_html=True)
-        lower_cols[2].altair_chart(
-            _horizontal_bar_chart(cost_stage_df, "Stage", "Estimated USD", height=230, sort=None),
+        st.markdown("<div class='section-label'>Cost by stage</div>", unsafe_allow_html=True)
+        st.altair_chart(
+            _horizontal_bar_chart(cost_stage_df, "Stage", "Estimated USD", height=220, sort=None),
             use_container_width=True,
         )
+        st.divider()
 
         st.markdown("<div class='section-label'>Top verified prospects</div>", unsafe_allow_html=True)
         _render_table(
