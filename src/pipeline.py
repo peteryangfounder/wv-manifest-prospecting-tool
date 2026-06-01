@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import db
+from .billing import calculate_tavily_billing
 from .clean import dedupe_names
 from .classify import classify_with_openai
 from .config import Settings
@@ -126,25 +127,39 @@ def enrich_candidates(
                 {"tavily_calls": calls, "enriched": enriched, "errors": errors, "cache_hits": cache_hits},
             )
 
-    estimated_cost_usd = calls * settings.tavily_cost_per_call_usd
+    tavily_billing = calculate_tavily_billing(
+        credits_used=calls,
+        included_monthly_credits=settings.tavily_included_monthly_credits,
+        pay_as_you_go_enabled=settings.tavily_pay_as_you_go_enabled,
+        payg_price_per_credit_usd=settings.tavily_payg_price_per_credit_usd,
+        plan_name=settings.tavily_plan_name,
+        shadow_price_per_credit_usd=settings.tavily_cost_per_call_usd,
+    )
     db.finish_run(
         conn,
         run_id,
         enriched_count=enriched,
         tavily_calls=calls,
         cache_hits=cache_hits,
-        estimated_cost_usd=estimated_cost_usd,
+        estimated_cost_usd=0.0,
         notes=f"Errors: {errors}. Force refresh: {force}.",
     )
     return PipelineResult(
         "tavily_enrichment",
-        f"Made {calls:,} Tavily calls and stored {enriched:,} successful enrichments. Estimated search spend: ${estimated_cost_usd:.4f}.",
+        (
+            f"Made {calls:,} Tavily calls and stored {enriched:,} successful enrichments. "
+            f"Tavily billed spend: ${tavily_billing.actual_billed_usd:.4f}; "
+            f"free credits remaining: {tavily_billing.free_credits_remaining:,}."
+        ),
         {
             "tavily_calls": calls,
+            "tavily_credits_used": tavily_billing.credits_used,
+            "tavily_actual_billed_usd": tavily_billing.actual_billed_usd,
+            "tavily_shadow_estimate_usd": tavily_billing.shadow_estimate_usd,
             "enriched": enriched,
             "errors": errors,
             "cache_hits": cache_hits,
-            "estimated_cost_usd": estimated_cost_usd,
+            "estimated_cost_usd": 0.0,
         },
     )
 

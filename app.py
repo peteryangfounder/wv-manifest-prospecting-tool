@@ -10,6 +10,14 @@ import pandas as pd
 import streamlit as st
 
 from src import db
+from src.billing import (
+    OpenAIBillingSnapshot,
+    ProviderBilledSpend,
+    TavilyBillingSummary,
+    calculate_provider_billed_spend,
+    calculate_tavily_billing,
+    fetch_openai_billing_snapshot,
+)
 from src.config import PROJECT_ROOT, get_settings
 from src.pipeline import (
     enrich_candidates,
@@ -680,6 +688,19 @@ def _format_currency(value: int | float | None) -> str:
     return f"${amount:,.2f}"
 
 
+def _format_money(value: int | float | None, currency: str = "usd") -> str:
+    currency_clean = (currency or "usd").upper()
+    if currency_clean == "USD":
+        return _format_currency(value)
+    return f"{float(value or 0):,.4f} {currency_clean}"
+
+
+def _format_billed_total(spend: ProviderBilledSpend) -> str:
+    if spend.is_complete:
+        return _format_currency(spend.total_billed_usd)
+    return "Unavailable"
+
+
 def _pct(part: int | float | None, whole: int | float | None) -> str:
     if not whole:
         return "0%"
@@ -845,26 +866,36 @@ def _render_summary_card(title: str, rows: list[tuple[str, str]]) -> None:
 
 def _render_cost_hero(
     *,
-    lifetime_cost: float,
-    cost_per_verified: float,
+    provider_spend: ProviderBilledSpend,
+    openai_billing: OpenAIBillingSnapshot,
+    tavily_billing: TavilyBillingSummary,
+    local_openai_estimate: float,
     total_tokens: int,
-    tavily_calls: int,
     openai_calls: int,
     last_api_calls: int,
-    last_run_cost: float,
+    last_run_local_openai_estimate: float,
     model_name: str,
 ) -> None:
+    openai_billed = (
+        _format_money(openai_billing.cost.total, openai_billing.cost.currency)
+        if openai_billing.available
+        else "Unavailable"
+    )
     items = [
-        ("Total tracked API spend", _format_currency(lifetime_cost)),
-        ("Average per API-scored company", _format_currency(cost_per_verified)),
+        ("Actual provider-billed spend", _format_billed_total(provider_spend)),
+        ("Live OpenAI billed cost", openai_billed),
+        ("Local OpenAI token estimate", _format_currency(local_openai_estimate)),
         ("OpenAI tokens tracked", _format_int(total_tokens)),
-        ("Tavily search calls", _format_int(tavily_calls)),
+        (
+            "Tavily free credits consumed",
+            f"{_format_int(tavily_billing.credits_used)} / {_format_int(tavily_billing.included_monthly_credits)}",
+        ),
         ("OpenAI scoring calls", _format_int(openai_calls)),
-        ("Last run", f"{_format_int(last_api_calls)} calls / {_format_currency(last_run_cost)}"),
+        ("Last run estimate", f"{_format_int(last_api_calls)} calls / {_format_currency(last_run_local_openai_estimate)}"),
     ]
-    body = ["<div class='cost-hero'><div class='cost-hero-title'>API cost summary</div><div class='cost-hero-grid'>"]
+    body = ["<div class='cost-hero'><div class='cost-hero-title'>Provider billing and local estimates</div><div class='cost-hero-grid'>"]
     for label, value in items:
-        value_class = "cost-hero-value compact" if label == "Last run" else "cost-hero-value"
+        value_class = "cost-hero-value compact" if label == "Last run estimate" else "cost-hero-value"
         body.append(
             "<div>"
             f"<div class='cost-hero-label'>{html.escape(_clean_ui_text(label))}</div>"
@@ -873,9 +904,28 @@ def _render_cost_hero(
         )
     body.append("</div>")
     body.append(
-        "<div class='quiet-note'>Spend includes Tavily search calls and OpenAI scoring tokens. "
-        f"Model: {html.escape(_clean_ui_text(model_name))}</div>"
+        "<div class='quiet-note'>Actual provider-billed spend is the reimbursement-relevant figure. "
+        f"OpenAI source: {html.escape(_clean_ui_text(openai_billing.source_label))}. "
+        f"Scope: {html.escape(_clean_ui_text(openai_billing.scope_label))}. "
+        f"Tavily plan: {html.escape(_clean_ui_text(tavily_billing.plan_name))}; "
+        f"Tavily billed spend: {html.escape(_format_currency(tavily_billing.actual_billed_usd))}. "
+        f"Streamlit Community Cloud hosting: {html.escape(_format_currency(provider_spend.hosting_billed_usd))}. "
+        f"Model for local estimate: {html.escape(_clean_ui_text(model_name))}.</div>"
     )
+    if (
+        openai_billing.available
+        and openai_billing.cost.currency == "usd"
+        and openai_billing.cost.total == 0
+        and local_openai_estimate > 0
+    ):
+        body.append(
+            "<div class='quiet-note'>Provider-billed cost is the source of truth. "
+            "The local estimate is a token-rate estimate and may differ because it is not the billing ledger.</div>"
+        )
+    if not openai_billing.available:
+        body.append(
+            "<div class='quiet-note'>Live OpenAI billing unavailable. The local OpenAI token estimate is shown for planning only and is not an invoice.</div>"
+        )
     body.append("</div>")
     st.markdown("".join(body), unsafe_allow_html=True)
 
@@ -949,6 +999,40 @@ def _settings_for_run(settings, model_name: str, input_cost: float, output_cost:
     )
 
 
+def _local_openai_estimate_usd(metrics: dict, settings) -> float:
+    openai_stage_total = 0.0
+    for row in metrics.get("cost_by_stage", []):
+        if row.get("run_type") == "openai_scoring":
+            openai_stage_total += float(row.get("estimated_cost_usd") or 0.0)
+    if openai_stage_total > 0:
+        return openai_stage_total
+
+    totals = metrics.get("run_totals") or {}
+    prompt_tokens = int(totals.get("prompt_tokens") or 0)
+    completion_tokens = int(totals.get("completion_tokens") or 0)
+    input_cost = (prompt_tokens / 1_000_000) * float(settings.openai_input_cost_per_1m_tokens or 0)
+    output_cost = (completion_tokens / 1_000_000) * float(settings.openai_output_cost_per_1m_tokens or 0)
+    return input_cost + output_cost
+
+
+def _last_run_local_openai_estimate_usd(last_run: dict) -> float:
+    if last_run.get("run_type") != "openai_scoring":
+        return 0.0
+    return float(last_run.get("estimated_cost_usd") or 0.0)
+
+
+def _tavily_billing_from_metrics(metrics: dict, settings) -> TavilyBillingSummary:
+    totals = metrics.get("run_totals") or {}
+    return calculate_tavily_billing(
+        credits_used=int(totals.get("tavily_calls") or 0),
+        included_monthly_credits=settings.tavily_included_monthly_credits,
+        pay_as_you_go_enabled=settings.tavily_pay_as_you_go_enabled,
+        payg_price_per_credit_usd=settings.tavily_payg_price_per_credit_usd,
+        plan_name=settings.tavily_plan_name,
+        shadow_price_per_credit_usd=settings.tavily_cost_per_call_usd,
+    )
+
+
 def _score_band_frame(frame: pd.DataFrame) -> pd.DataFrame:
     labels = ["0-19", "20-39", "40-59", "60-79", "80-100"]
     if frame.empty:
@@ -987,22 +1071,22 @@ def _type_frame(frame: pd.DataFrame, limit: int = 8) -> pd.DataFrame:
 def _stage_cost_frame(metrics: dict, settings) -> pd.DataFrame:
     rows = []
     for row in metrics.get("cost_by_stage", []):
+        if row.get("run_type") != "openai_scoring":
+            continue
         cost = float(row.get("estimated_cost_usd") or 0)
         if cost > 0:
             rows.append({"Stage": _humanize(row.get("run_type")), "Estimated USD": cost})
     if not rows:
-        rows = [{"Stage": "No tracked API spend", "Estimated USD": 0.0}]
+        rows = [{"Stage": "No local OpenAI estimate", "Estimated USD": 0.0}]
     return pd.DataFrame(rows)
 
 
 def _resource_cost_frame(metrics: dict, settings) -> pd.DataFrame:
-    totals = metrics.get("run_totals") or {}
-    tavily_cost = int(totals.get("tavily_calls") or 0) * settings.tavily_cost_per_call_usd
-    tracked_cost = float(totals.get("estimated_cost_usd") or 0)
-    openai_cost = max(0.0, tracked_cost - tavily_cost)
+    tavily_billing = _tavily_billing_from_metrics(metrics, settings)
+    openai_cost = _local_openai_estimate_usd(metrics, settings)
     rows = [
-        {"Resource": "Search API", "Estimated USD": tavily_cost},
-        {"Resource": "OpenAI model", "Estimated USD": openai_cost},
+        {"Resource": "Local OpenAI token estimate", "Estimated USD": openai_cost},
+        {"Resource": "Tavily shadow value, not billed", "Estimated USD": tavily_billing.shadow_estimate_usd},
     ]
     return pd.DataFrame(rows)
 
@@ -1265,7 +1349,9 @@ with st.sidebar:
         "<div class='sidebar-badge'><strong>Tavily</strong>: "
         f"{'configured' if settings.tavily_api_key else 'missing key'}</div>"
         "<div class='sidebar-badge'><strong>OpenAI</strong>: "
-        f"{'configured' if settings.openai_api_key else 'missing key'}</div>",
+        f"{'configured' if settings.openai_api_key else 'missing key'}</div>"
+        "<div class='sidebar-badge'><strong>OpenAI billing</strong>: "
+        f"{'admin key configured' if settings.openai_admin_key else 'admin key missing'}</div>",
         unsafe_allow_html=True,
     )
     st.caption(f"SQLite: `{display_database_path}`")
@@ -1377,10 +1463,10 @@ if workflow_stage >= 2:
     model_pricing = _selected_model_pricing(selected_model)
     runtime_settings = _settings_for_run(settings, selected_model, model_pricing["input"], model_pricing["output"])
     settings_cols[2].markdown(
-        f"**Cost estimate**  \n"
+        f"**Local OpenAI estimate**  \n"
         f"Input: `${model_pricing['input']:g}` / 1M tokens  \n"
         f"Output: `${model_pricing['output']:g}` / 1M tokens  \n"
-        f"Search: `${settings.tavily_cost_per_call_usd:g}` / call"
+        f"Tavily: `{settings.tavily_plan_name}` plan credits"
     )
 
 if workflow_stage == 1:
@@ -1454,13 +1540,14 @@ if run_step == "verify":
     )
     progress.progress(1.0, text="Verification run finished.")
     level = "warning" if enrich_result.counts.get("errors") or score_result.counts.get("errors") else "success"
-    total_spend = float(enrich_result.counts.get("estimated_cost_usd") or 0) + float(
-        score_result.counts.get("estimated_cost_usd") or 0
-    )
+    run_openai_estimate = float(score_result.counts.get("estimated_cost_usd") or 0)
+    run_tavily_credits = int(enrich_result.counts.get("tavily_credits_used") or enrich_result.counts.get("tavily_calls") or 0)
+    run_tavily_billed = float(enrich_result.counts.get("tavily_actual_billed_usd") or 0)
     st.session_state["last_action"] = {
         "message": (
             f"Verified {score_result.counts.get('scored', 0):,} companies from a {cap:,}-company batch. "
-            f"Estimated run spend: {_format_currency(total_spend)}."
+            f"Local OpenAI token estimate: {_format_currency(run_openai_estimate)}. "
+            f"Tavily credits consumed: {run_tavily_credits:,}; Tavily billed spend: {_format_currency(run_tavily_billed)}."
         ),
         "level": level,
     }
@@ -1492,18 +1579,30 @@ candidate_count = int(weighted_frame["is_candidate"].sum()) if not weighted_fram
 run_totals = metrics.get("run_totals") or {}
 last_run = metrics.get("last_run") or {}
 last_api_calls = int(last_run.get("tavily_calls") or 0) + int(last_run.get("openai_calls") or 0)
-lifetime_api_calls = int(run_totals.get("tavily_calls") or 0) + int(run_totals.get("openai_calls") or 0)
-lifetime_cost = float(run_totals.get("estimated_cost_usd") or 0)
-cost_per_verified = lifetime_cost / int(metrics["openai_scored"] or 1) if metrics.get("openai_scored") else 0
+tavily_billing = _tavily_billing_from_metrics(metrics, settings)
+openai_billing = fetch_openai_billing_snapshot(
+    admin_key=settings.openai_admin_key,
+    project_id=settings.openai_billing_project_id,
+    lookback_days=settings.openai_billing_lookback_days,
+    cache_ttl_seconds=settings.openai_billing_cache_ttl_seconds,
+)
+provider_spend = calculate_provider_billed_spend(
+    tavily_billing=tavily_billing,
+    openai_billing=openai_billing,
+    hosting_billed_usd=0.0,
+)
+local_openai_estimate = _local_openai_estimate_usd(metrics, runtime_settings)
+last_run_local_openai_estimate = _last_run_local_openai_estimate_usd(last_run)
 
 _render_cost_hero(
-    lifetime_cost=lifetime_cost,
-    cost_per_verified=cost_per_verified,
+    provider_spend=provider_spend,
+    openai_billing=openai_billing,
+    tavily_billing=tavily_billing,
+    local_openai_estimate=local_openai_estimate,
     total_tokens=int(run_totals.get("total_tokens") or 0),
-    tavily_calls=int(run_totals.get("tavily_calls") or 0),
     openai_calls=int(run_totals.get("openai_calls") or 0),
     last_api_calls=last_api_calls,
-    last_run_cost=float(last_run.get("estimated_cost_usd") or 0),
+    last_run_local_openai_estimate=last_run_local_openai_estimate,
     model_name=str(runtime_settings.openai_model),
 )
 
@@ -1520,12 +1619,14 @@ with summary_cols[0]:
     )
 with summary_cols[1]:
     _render_summary_card(
-        "Pricing assumptions",
+        "Billing configuration",
         [
-            ("OpenAI model", str(runtime_settings.openai_model)),
-            ("OpenAI input", f"${runtime_settings.openai_input_cost_per_1m_tokens:g} per 1M tokens"),
-            ("OpenAI output", f"${runtime_settings.openai_output_cost_per_1m_tokens:g} per 1M tokens"),
-            ("Search API", f"${settings.tavily_cost_per_call_usd:g} per call"),
+            ("OpenAI billing source", openai_billing.source_label),
+            ("OpenAI scope", openai_billing.scope_label),
+            ("Tavily plan", str(tavily_billing.plan_name)),
+            ("Tavily pay-as-you-go", "enabled" if tavily_billing.pay_as_you_go_enabled else "disabled"),
+            ("Tavily free credits remaining", _format_int(tavily_billing.free_credits_remaining)),
+            ("Streamlit Community Cloud hosting", _format_currency(provider_spend.hosting_billed_usd)),
         ],
     )
 
@@ -1576,7 +1677,11 @@ else:
         )
         st.divider()
 
-        st.markdown("<div class='section-label'>Estimated API spend</div>", unsafe_allow_html=True)
+        st.markdown("<div class='section-label'>Internal estimates and shadow values</div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='quiet-note'>These values support planning and projections. They are not provider-billed reimbursement totals.</div>",
+            unsafe_allow_html=True,
+        )
         st.altair_chart(
             _horizontal_bar_chart(_resource_cost_frame(metrics, settings), "Resource", "Estimated USD", height=220),
             use_container_width=True,
@@ -1584,7 +1689,7 @@ else:
         st.divider()
 
         cost_stage_df = _stage_cost_frame(metrics, settings)
-        st.markdown("<div class='section-label'>Cost by stage</div>", unsafe_allow_html=True)
+        st.markdown("<div class='section-label'>Local OpenAI estimate by stage</div>", unsafe_allow_html=True)
         st.altair_chart(
             _horizontal_bar_chart(cost_stage_df, "Stage", "Estimated USD", height=220, sort=None),
             use_container_width=True,

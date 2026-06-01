@@ -13,7 +13,7 @@ Hosted app: https://wv-manifest-prospecting-tool-b8jadagmhgsh8wirbknjb9.streamli
 - Verified prospects view for companies that passed evidence enrichment and API scoring.
 - Larger full-width charts with horizontal labels for readability.
 - Responsive prospect cards so company descriptions and sector tags stay readable across desktop, tablet, and mobile.
-- Prominent API cost summary that combines OpenAI token spend and Tavily search-call spend.
+- Prominent billing summary that separates provider-billed spend from local token estimates and Tavily credit consumption.
 - Model selector and batch cap for controlling how many companies get verified in each run.
 - Scoring weight controls for investor preference changes.
 - Simple reset button that clears local source rows, cached enrichments, scores, and run history.
@@ -43,6 +43,7 @@ Edit `.env`:
 
 ```bash
 OPENAI_API_KEY=your_openai_key_here
+OPENAI_ADMIN_KEY=your_openai_admin_key_here
 TAVILY_API_KEY=your_tavily_key_here
 OPENAI_MODEL=gpt-4o-mini
 MAX_ENRICH=75
@@ -52,9 +53,16 @@ DATABASE_PATH=data/prospects.db
 OPENAI_INPUT_COST_PER_1M_TOKENS=0.15
 OPENAI_OUTPUT_COST_PER_1M_TOKENS=0.60
 TAVILY_COST_PER_CALL_USD=0.001
+OPENAI_BILLING_PROJECT_ID=
+OPENAI_BILLING_LOOKBACK_DAYS=31
+OPENAI_BILLING_CACHE_TTL_SECONDS=300
+TAVILY_PLAN_NAME=Researcher
+TAVILY_INCLUDED_MONTHLY_CREDITS=1000
+TAVILY_PAY_AS_YOU_GO_ENABLED=false
+TAVILY_PAYG_PRICE_PER_CREDIT_USD=0.008
 ```
 
-The app opens without API keys and can create baseline rule scores. Set `TAVILY_API_KEY` to retrieve external search evidence. Set `OPENAI_API_KEY` to generate API-scored verified prospects.
+The app opens without API keys and can create baseline rule scores. Set `TAVILY_API_KEY` to retrieve external search evidence. Set `OPENAI_API_KEY` to generate API-scored verified prospects. Set `OPENAI_ADMIN_KEY` only when you want the dashboard to read live OpenAI organization costs and usage from the admin billing endpoints; it is separate from the normal inference key.
 
 ## Run Locally
 
@@ -97,21 +105,27 @@ python scripts/run_pipeline.py --score --max-score 25
 
 `src/db.py` stores companies, enrichments, scores, and run metadata. The dashboard uses that run metadata for API-call counts, tokens, cache hits, and estimated spend.
 
-## Cost And Usage Tracking
+## Billing And Usage Tracking
 
-The dashboard tracks all metered providers currently used by the app:
+The dashboard separates provider-billed spend from internal estimates:
 
 - Tavily search calls
+- Tavily plan credits consumed
+- Tavily free credits remaining
+- Tavily actual billed spend, which is `$0.00` on the Researcher plan while pay-as-you-go is disabled
 - OpenAI scoring calls
 - OpenAI input tokens
 - OpenAI output tokens
 - OpenAI total tokens
-- Estimated Tavily search spend
-- Estimated OpenAI model spend
-- Total tracked API spend
-- Average tracked spend per API-scored company
+- Live OpenAI billed cost from `GET /v1/organization/costs` when `OPENAI_ADMIN_KEY` is configured
+- Live OpenAI completions usage from `GET /v1/organization/usage/completions` when `OPENAI_ADMIN_KEY` is configured
+- Local OpenAI token estimate based on configured token prices
+- Tavily shadow value for planning only, not reimbursement
+- Streamlit Community Cloud hosting shown as `$0.00`
 
-The cost summary is an estimate based on configured model pricing and Tavily cost per call. SQLite stores every run so reruns can show cumulative usage and last-run usage.
+Provider-billed OpenAI cost is the source of truth for reimbursement when available. If live OpenAI billing is unavailable because `OPENAI_ADMIN_KEY` is missing or the API request fails, the app continues running and clearly labels the local token-based fallback as an estimate rather than an invoice. SQLite stores every run so reruns can show cumulative calls, tokens, cache hits, and local estimates.
+
+`TAVILY_COST_PER_CALL_USD` remains supported as an internal shadow estimate for projections. It is not included in actual provider-billed spend unless Tavily pay-as-you-go is explicitly enabled, in which case overage credits beyond `TAVILY_INCLUDED_MONTHLY_CREDITS` are billed using `TAVILY_PAYG_PRICE_PER_CREDIT_USD`.
 
 ## Caching And Reset
 

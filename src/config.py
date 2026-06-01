@@ -46,6 +46,13 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _env_path(name: str, default: Path) -> Path:
     value = os.getenv(name)
     if not value:
@@ -69,6 +76,14 @@ class Settings:
     openai_input_cost_per_1m_tokens: float
     openai_output_cost_per_1m_tokens: float
     tavily_cost_per_call_usd: float
+    tavily_plan_name: str = "Researcher"
+    tavily_included_monthly_credits: int = 1000
+    tavily_pay_as_you_go_enabled: bool = False
+    tavily_payg_price_per_credit_usd: float = 0.008
+    openai_admin_key: str | None = None
+    openai_billing_project_id: str | None = None
+    openai_billing_lookback_days: int = 31
+    openai_billing_cache_ttl_seconds: int = 300
 
 
 def get_settings() -> Settings:
@@ -85,4 +100,12 @@ def get_settings() -> Settings:
         openai_input_cost_per_1m_tokens=_env_float("OPENAI_INPUT_COST_PER_1M_TOKENS", 0.15),
         openai_output_cost_per_1m_tokens=_env_float("OPENAI_OUTPUT_COST_PER_1M_TOKENS", 0.60),
         tavily_cost_per_call_usd=_env_float("TAVILY_COST_PER_CALL_USD", 0.001),
+        tavily_plan_name=os.getenv("TAVILY_PLAN_NAME", "Researcher"),
+        tavily_included_monthly_credits=_env_int("TAVILY_INCLUDED_MONTHLY_CREDITS", 1000),
+        tavily_pay_as_you_go_enabled=_env_bool("TAVILY_PAY_AS_YOU_GO_ENABLED", False),
+        tavily_payg_price_per_credit_usd=_env_float("TAVILY_PAYG_PRICE_PER_CREDIT_USD", 0.008),
+        openai_admin_key=os.getenv("OPENAI_ADMIN_KEY") or None,
+        openai_billing_project_id=os.getenv("OPENAI_BILLING_PROJECT_ID") or None,
+        openai_billing_lookback_days=_env_int("OPENAI_BILLING_LOOKBACK_DAYS", 31),
+        openai_billing_cache_ttl_seconds=_env_int("OPENAI_BILLING_CACHE_TTL_SECONDS", 300),
     )
