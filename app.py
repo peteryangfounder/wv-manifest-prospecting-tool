@@ -701,6 +701,18 @@ def _format_billed_total(spend: ProviderBilledSpend) -> str:
     return "Unavailable"
 
 
+def _format_openai_billed(snapshot: OpenAIBillingSnapshot) -> str:
+    if snapshot.available and snapshot.is_project_scoped:
+        return _format_money(snapshot.cost.total, snapshot.cost.currency)
+    return "Unavailable"
+
+
+def _cache_status(snapshot: OpenAIBillingSnapshot) -> str:
+    if not snapshot.available:
+        return "unavailable"
+    return "cache" if snapshot.from_cache else "fresh API fetch"
+
+
 def _pct(part: int | float | None, whole: int | float | None) -> str:
     if not whole:
         return "0%"
@@ -867,7 +879,8 @@ def _render_summary_card(title: str, rows: list[tuple[str, str]]) -> None:
 def _render_cost_hero(
     *,
     provider_spend: ProviderBilledSpend,
-    openai_billing: OpenAIBillingSnapshot,
+    lifetime_openai_billing: OpenAIBillingSnapshot,
+    recent_openai_billing: OpenAIBillingSnapshot,
     tavily_billing: TavilyBillingSummary,
     local_openai_estimate: float,
     total_tokens: int,
@@ -876,14 +889,12 @@ def _render_cost_hero(
     last_run_local_openai_estimate: float,
     model_name: str,
 ) -> None:
-    openai_billed = (
-        _format_money(openai_billing.cost.total, openai_billing.cost.currency)
-        if openai_billing.available
-        else "Unavailable"
-    )
     items = [
-        ("Actual provider-billed spend", _format_billed_total(provider_spend)),
-        ("Live OpenAI billed cost", openai_billed),
+        ("Actual provider-billed spend, Wittington project lifetime to date", _format_billed_total(provider_spend)),
+        (
+            f"Actual provider-billed spend, {recent_openai_billing.window_label}",
+            _format_openai_billed(recent_openai_billing),
+        ),
         ("Local OpenAI token estimate", _format_currency(local_openai_estimate)),
         ("OpenAI tokens tracked", _format_int(total_tokens)),
         (
@@ -905,26 +916,35 @@ def _render_cost_hero(
     body.append("</div>")
     body.append(
         "<div class='quiet-note'>Actual provider-billed spend is the reimbursement-relevant figure. "
-        f"OpenAI source: {html.escape(_clean_ui_text(openai_billing.source_label))}. "
-        f"Scope: {html.escape(_clean_ui_text(openai_billing.scope_label))}. "
+        f"Live billing source: {html.escape(_clean_ui_text(lifetime_openai_billing.source_label))}. "
+        f"Project ID used: {html.escape(_clean_ui_text(lifetime_openai_billing.project_id or 'None'))}. "
+        f"Billing window start date: {html.escape(_clean_ui_text(lifetime_openai_billing.window_start_label or 'Unavailable'))}. "
+        f"Last fetched: {html.escape(_clean_ui_text(lifetime_openai_billing.fetched_at_label or 'Unavailable'))}. "
+        f"Fetch status: {html.escape(_clean_ui_text(_cache_status(lifetime_openai_billing)))}. "
+        f"Scope: {html.escape(_clean_ui_text(lifetime_openai_billing.scope_label))}. "
         f"Tavily plan: {html.escape(_clean_ui_text(tavily_billing.plan_name))}; "
         f"Tavily billed spend: {html.escape(_format_currency(tavily_billing.actual_billed_usd))}. "
         f"Streamlit Community Cloud hosting: {html.escape(_format_currency(provider_spend.hosting_billed_usd))}. "
         f"Model for local estimate: {html.escape(_clean_ui_text(model_name))}.</div>"
     )
     if (
-        openai_billing.available
-        and openai_billing.cost.currency == "usd"
-        and openai_billing.cost.total == 0
+        lifetime_openai_billing.available
+        and lifetime_openai_billing.is_project_scoped
+        and lifetime_openai_billing.cost.currency == "usd"
+        and lifetime_openai_billing.cost.total == 0
         and local_openai_estimate > 0
     ):
         body.append(
             "<div class='quiet-note'>Provider-billed cost is the source of truth. "
             "The local estimate is a token-rate estimate and may differ because it is not the billing ledger.</div>"
         )
-    if not openai_billing.available:
+    if not lifetime_openai_billing.available:
         body.append(
             "<div class='quiet-note'>Live OpenAI billing unavailable. The local OpenAI token estimate is shown for planning only and is not an invoice.</div>"
+        )
+    elif not lifetime_openai_billing.is_project_scoped:
+        body.append(
+            "<div class='quiet-note'>Live OpenAI billing returned organization-level data. It is labelled as org-wide context and is not used as the Wittington project reimbursement total.</div>"
         )
     body.append("</div>")
     st.markdown("".join(body), unsafe_allow_html=True)
@@ -1001,6 +1021,13 @@ def _settings_for_run(settings, model_name: str, input_cost: float, output_cost:
 
 def _setting(settings, name: str, default):
     return getattr(settings, name, default)
+
+
+def _setting_int(settings, name: str, default: int) -> int:
+    try:
+        return int(_setting(settings, name, default) or default)
+    except (TypeError, ValueError):
+        return default
 
 
 def _local_openai_estimate_usd(metrics: dict, settings) -> float:
@@ -1584,15 +1611,28 @@ run_totals = metrics.get("run_totals") or {}
 last_run = metrics.get("last_run") or {}
 last_api_calls = int(last_run.get("tavily_calls") or 0) + int(last_run.get("openai_calls") or 0)
 tavily_billing = _tavily_billing_from_metrics(metrics, settings)
-openai_billing = fetch_openai_billing_snapshot(
+billing_project_id = _setting(settings, "openai_billing_project_id", "proj_ynS2F3GVOCBbgmXvTl9Vl1Ie")
+billing_start_date = _setting(settings, "openai_billing_start_date", "2026-05-31")
+billing_lookback_days = _setting_int(settings, "openai_billing_lookback_days", 30)
+billing_cache_ttl_seconds = _setting_int(settings, "openai_billing_cache_ttl_seconds", 300)
+lifetime_openai_billing = fetch_openai_billing_snapshot(
     admin_key=_setting(settings, "openai_admin_key", None),
-    project_id=_setting(settings, "openai_billing_project_id", None),
-    lookback_days=_setting(settings, "openai_billing_lookback_days", 31),
-    cache_ttl_seconds=_setting(settings, "openai_billing_cache_ttl_seconds", 300),
+    project_id=billing_project_id,
+    start_date=billing_start_date,
+    lookback_days=billing_lookback_days,
+    window_label="Wittington project lifetime to date",
+    cache_ttl_seconds=billing_cache_ttl_seconds,
+)
+recent_openai_billing = fetch_openai_billing_snapshot(
+    admin_key=_setting(settings, "openai_admin_key", None),
+    project_id=billing_project_id,
+    lookback_days=billing_lookback_days,
+    window_label=f"last {billing_lookback_days} days",
+    cache_ttl_seconds=billing_cache_ttl_seconds,
 )
 provider_spend = calculate_provider_billed_spend(
     tavily_billing=tavily_billing,
-    openai_billing=openai_billing,
+    openai_billing=lifetime_openai_billing,
     hosting_billed_usd=0.0,
 )
 local_openai_estimate = _local_openai_estimate_usd(metrics, runtime_settings)
@@ -1600,7 +1640,8 @@ last_run_local_openai_estimate = _last_run_local_openai_estimate_usd(last_run)
 
 _render_cost_hero(
     provider_spend=provider_spend,
-    openai_billing=openai_billing,
+    lifetime_openai_billing=lifetime_openai_billing,
+    recent_openai_billing=recent_openai_billing,
     tavily_billing=tavily_billing,
     local_openai_estimate=local_openai_estimate,
     total_tokens=int(run_totals.get("total_tokens") or 0),
@@ -1625,8 +1666,12 @@ with summary_cols[1]:
     _render_summary_card(
         "Billing configuration",
         [
-            ("OpenAI billing source", openai_billing.source_label),
-            ("OpenAI scope", openai_billing.scope_label),
+            ("OpenAI billing source", lifetime_openai_billing.source_label),
+            ("OpenAI project ID", str(lifetime_openai_billing.project_id or "None")),
+            ("Billing window start", str(lifetime_openai_billing.window_start_label or "Unavailable")),
+            ("Last fetched", str(lifetime_openai_billing.fetched_at_label or "Unavailable")),
+            ("Fetch status", _cache_status(lifetime_openai_billing)),
+            ("OpenAI scope", lifetime_openai_billing.scope_label),
             ("Tavily plan", str(tavily_billing.plan_name)),
             ("Tavily pay-as-you-go", "enabled" if tavily_billing.pay_as_you_go_enabled else "disabled"),
             ("Tavily free credits remaining", _format_int(tavily_billing.free_credits_remaining)),

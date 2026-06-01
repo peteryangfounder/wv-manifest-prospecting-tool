@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from src import billing
 from src.billing import (
     OpenAIBillingSnapshot,
     calculate_provider_billed_spend,
@@ -112,11 +113,13 @@ def test_openai_usage_parser_extracts_token_model_project_key_and_requests() -> 
 
 
 def test_openai_billing_missing_admin_key_does_not_crash() -> None:
-    snapshot = fetch_openai_billing_snapshot(admin_key=None)
+    snapshot = fetch_openai_billing_snapshot(admin_key=None, project_id="proj_test", start_date="2026-05-31")
 
     assert snapshot.available is False
     assert snapshot.status == "missing_admin_key"
     assert "unavailable" in snapshot.source_label.lower()
+    assert snapshot.project_id == "proj_test"
+    assert snapshot.window_start_label == "2026-05-31"
 
 
 def test_openai_billing_api_failure_does_not_crash() -> None:
@@ -166,7 +169,9 @@ def test_openai_billing_client_parses_cost_and_usage_responses() -> None:
     snapshot = fetch_openai_billing_snapshot(
         admin_key="admin-key",
         project_id="proj_a",
+        start_date="2026-05-31",
         lookback_days=7,
+        window_label="project lifetime to date",
         cache_ttl_seconds=0,
         session=session,
         now=1_800_000_000,
@@ -179,7 +184,98 @@ def test_openai_billing_client_parses_cost_and_usage_responses() -> None:
     assert snapshot.usage.output_tokens == 5
     assert snapshot.usage.cached_input_tokens == 2
     assert snapshot.usage.request_count == 1
+    assert snapshot.project_id == "proj_a"
+    assert snapshot.window_start_label == "2026-05-31"
+    assert snapshot.fetched_at_label == "2027-01-15T08:00:00Z"
+    assert snapshot.from_cache is False
+    assert snapshot.is_project_scoped is True
+    assert snapshot.window_label == "project lifetime to date"
     assert all(call["headers"]["Authorization"] == "Bearer admin-key" for call in session.calls)
+
+
+def test_openai_billing_client_paginates_lifetime_cost_and_usage() -> None:
+    session = MockSession(
+        [
+            MockResponse(
+                {
+                    "object": "page",
+                    "data": [{"results": [{"amount": {"value": 0.10, "currency": "usd"}}]}],
+                    "has_more": True,
+                    "next_page": "cost_page_2",
+                }
+            ),
+            MockResponse(
+                {
+                    "object": "page",
+                    "data": [{"results": [{"amount": {"value": 0.15, "currency": "usd"}}]}],
+                    "has_more": False,
+                }
+            ),
+            MockResponse(
+                {
+                    "object": "page",
+                    "data": [{"results": [{"input_tokens": 10, "output_tokens": 5, "num_model_requests": 1}]}],
+                    "has_more": True,
+                    "next_page": "usage_page_2",
+                }
+            ),
+            MockResponse(
+                {
+                    "object": "page",
+                    "data": [{"results": [{"input_tokens": 20, "output_tokens": 7, "num_model_requests": 3}]}],
+                    "has_more": False,
+                }
+            ),
+        ]
+    )
+
+    snapshot = fetch_openai_billing_snapshot(
+        admin_key="admin-key",
+        project_id="proj_a",
+        start_date="2026-05-31",
+        cache_ttl_seconds=0,
+        session=session,
+        now=1_800_000_000,
+    )
+
+    assert snapshot.cost.total == pytest.approx(0.25)
+    assert snapshot.cost.bucket_count == 2
+    assert snapshot.usage.input_tokens == 30
+    assert snapshot.usage.output_tokens == 12
+    assert snapshot.usage.request_count == 4
+    assert session.calls[1]["params"][-1] == ("page", "cost_page_2")
+    assert session.calls[3]["params"][-1] == ("page", "usage_page_2")
+
+
+def test_openai_billing_cache_reports_cached_snapshot(monkeypatch) -> None:
+    billing._OPENAI_BILLING_CACHE.clear()
+    session = MockSession(
+        [
+            MockResponse({"object": "page", "data": [{"results": [{"amount": {"value": 0.10, "currency": "usd"}}]}]}),
+            MockResponse({"object": "page", "data": [{"results": [{"input_tokens": 1, "output_tokens": 2}]}]}),
+        ]
+    )
+    monkeypatch.setattr(billing.requests, "Session", lambda: session)
+
+    first = fetch_openai_billing_snapshot(
+        admin_key="admin-key",
+        project_id="proj_a",
+        start_date="2026-05-31",
+        cache_ttl_seconds=300,
+        now=1_800_000_000,
+    )
+    second = fetch_openai_billing_snapshot(
+        admin_key="admin-key",
+        project_id="proj_a",
+        start_date="2026-05-31",
+        cache_ttl_seconds=300,
+        now=1_800_000_100,
+    )
+
+    assert first.from_cache is False
+    assert second.from_cache is True
+    assert second.fetched_at == first.fetched_at
+    assert len(session.calls) == 2
 
 
 def test_actual_provider_billed_total_excludes_tavily_free_credits() -> None:
@@ -195,5 +291,24 @@ def test_actual_provider_billed_total_excludes_tavily_free_credits() -> None:
 
     assert tavily.shadow_estimate_usd == pytest.approx(0.02)
     assert total.tavily_billed_usd == 0.0
+    assert total.total_billed_usd == 0.0
+    assert total.is_complete is False
+
+
+def test_provider_billed_total_does_not_use_org_fallback_for_project_total() -> None:
+    tavily = calculate_tavily_billing(credits_used=0)
+    openai = OpenAIBillingSnapshot(
+        available=True,
+        status="live_org_fallback",
+        source_label="Live from OpenAI organization costs API",
+        scope_label="Organization-level billing; project filter unavailable: proj_a",
+        project_id="proj_a",
+        cost=parse_openai_costs_response({"data": [{"results": [{"amount": {"value": 9.99, "currency": "usd"}}]}]}),
+        is_project_scoped=False,
+    )
+
+    total = calculate_provider_billed_spend(tavily_billing=tavily, openai_billing=openai, hosting_billed_usd=0.0)
+
+    assert total.openai_billed_usd is None
     assert total.total_billed_usd == 0.0
     assert total.is_complete is False

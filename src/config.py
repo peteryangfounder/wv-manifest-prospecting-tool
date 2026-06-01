@@ -81,8 +81,9 @@ class Settings:
     tavily_pay_as_you_go_enabled: bool = False
     tavily_payg_price_per_credit_usd: float = 0.008
     openai_admin_key: str | None = None
-    openai_billing_project_id: str | None = None
-    openai_billing_lookback_days: int = 31
+    openai_billing_project_id: str | None = "proj_ynS2F3GVOCBbgmXvTl9Vl1Ie"
+    openai_billing_start_date: str = "2026-05-31"
+    openai_billing_lookback_days: int = 30
     openai_billing_cache_ttl_seconds: int = 300
 
 
@@ -105,7 +106,8 @@ def get_settings() -> Settings:
         tavily_pay_as_you_go_enabled=_env_bool("TAVILY_PAY_AS_YOU_GO_ENABLED", False),
         tavily_payg_price_per_credit_usd=_env_float("TAVILY_PAYG_PRICE_PER_CREDIT_USD", 0.008),
         openai_admin_key=os.getenv("OPENAI_ADMIN_KEY") or None,
-        openai_billing_project_id=os.getenv("OPENAI_BILLING_PROJECT_ID") or None,
-        openai_billing_lookback_days=_env_int("OPENAI_BILLING_LOOKBACK_DAYS", 31),
+        openai_billing_project_id=os.getenv("OPENAI_BILLING_PROJECT_ID") or "proj_ynS2F3GVOCBbgmXvTl9Vl1Ie",
+        openai_billing_start_date=os.getenv("OPENAI_BILLING_START_DATE", "2026-05-31"),
+        openai_billing_lookback_days=_env_int("OPENAI_BILLING_LOOKBACK_DAYS", 30),
         openai_billing_cache_ttl_seconds=_env_int("OPENAI_BILLING_CACHE_TTL_SECONDS", 300),
     )

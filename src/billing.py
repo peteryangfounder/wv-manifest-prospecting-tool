@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -51,6 +52,15 @@ class OpenAIBillingSnapshot:
     scope_label: str
     cost: OpenAICostSummary = field(default_factory=OpenAICostSummary)
     usage: OpenAIUsageSummary = field(default_factory=OpenAIUsageSummary)
+    project_id: str | None = None
+    window_start: int | None = None
+    window_end: int | None = None
+    window_start_label: str | None = None
+    fetched_at: int | None = None
+    fetched_at_label: str | None = None
+    from_cache: bool = False
+    is_project_scoped: bool = False
+    window_label: str = "billing window"
     error: str | None = None
 
 
@@ -64,7 +74,7 @@ class ProviderBilledSpend:
     status: str
 
 
-_OPENAI_BILLING_CACHE: dict[tuple[str | None, int], tuple[float, OpenAIBillingSnapshot]] = {}
+_OPENAI_BILLING_CACHE: dict[tuple[str | None, str, str], tuple[float, OpenAIBillingSnapshot]] = {}
 
 
 def calculate_tavily_billing(
@@ -174,33 +184,71 @@ def fetch_openai_billing_snapshot(
     *,
     admin_key: str | None,
     project_id: str | None = None,
+    start_date: str | None = None,
     lookback_days: int = 31,
+    window_label: str | None = None,
     cache_ttl_seconds: int = 300,
     session: requests.Session | None = None,
     now: float | None = None,
 ) -> OpenAIBillingSnapshot:
+    current_time = float(now if now is not None else time.time())
+    end_time = int(current_time)
+    if start_date:
+        start_time = _start_date_to_epoch(start_date, fallback_end_time=end_time, fallback_days=lookback_days)
+        resolved_window_label = window_label or "project lifetime to date"
+        window_cache_id = f"start:{_format_epoch_date(start_time)}"
+    else:
+        days = max(1, int(lookback_days or 1))
+        start_time = end_time - (days * 86_400)
+        resolved_window_label = window_label or f"last {days} days"
+        window_cache_id = f"lookback:{days}"
+    window_start_label = _format_epoch_date(start_time)
+    fetched_at_label = _format_epoch_datetime(end_time)
+
     if not admin_key:
         return OpenAIBillingSnapshot(
             available=False,
             status="missing_admin_key",
             source_label="Live OpenAI billing unavailable",
             scope_label="No OpenAI admin key configured",
+            project_id=project_id,
+            window_start=start_time,
+            window_end=end_time,
+            window_start_label=window_start_label,
+            fetched_at=end_time,
+            fetched_at_label=fetched_at_label,
+            window_label=resolved_window_label,
             error="OPENAI_ADMIN_KEY is not configured.",
         )
 
-    current_time = float(now if now is not None else time.time())
     ttl = max(0, int(cache_ttl_seconds or 0))
-    cache_key = (project_id or None, max(1, int(lookback_days or 1)))
+    cache_key = (project_id or None, window_cache_id, resolved_window_label)
     if ttl > 0 and session is None:
         cached = _OPENAI_BILLING_CACHE.get(cache_key)
         if cached and current_time - cached[0] < ttl:
-            return cached[1]
+            snapshot = cached[1]
+            return OpenAIBillingSnapshot(
+                available=snapshot.available,
+                status=snapshot.status,
+                source_label=snapshot.source_label,
+                scope_label=snapshot.scope_label,
+                cost=snapshot.cost,
+                usage=snapshot.usage,
+                project_id=snapshot.project_id,
+                window_start=snapshot.window_start,
+                window_end=snapshot.window_end,
+                window_start_label=snapshot.window_start_label,
+                fetched_at=snapshot.fetched_at,
+                fetched_at_label=snapshot.fetched_at_label,
+                from_cache=True,
+                is_project_scoped=snapshot.is_project_scoped,
+                window_label=snapshot.window_label,
+                error=snapshot.error,
+            )
 
     client = session or requests.Session()
     headers = {"Authorization": f"Bearer {admin_key}", "Content-Type": "application/json"}
-    start_time = int(current_time) - (max(1, int(lookback_days or 1)) * 86_400)
-    end_time = int(current_time)
-    limit = min(31, max(1, int(lookback_days or 1)))
+    limit = 31
     common_params: list[tuple[str, Any]] = [
         ("start_time", start_time),
         ("end_time", end_time),
@@ -239,6 +287,14 @@ def fetch_openai_billing_snapshot(
                     scope_label=f"Organization-level billing; project filter unavailable: {project_id}",
                     cost=cost,
                     usage=usage,
+                    project_id=project_id,
+                    window_start=start_time,
+                    window_end=end_time,
+                    window_start_label=window_start_label,
+                    fetched_at=end_time,
+                    fetched_at_label=fetched_at_label,
+                    is_project_scoped=False,
+                    window_label=resolved_window_label,
                     error=_sanitize_error(str(exc)),
                 )
                 if ttl > 0 and session is None:
@@ -251,6 +307,13 @@ def fetch_openai_billing_snapshot(
             status="api_error",
             source_label="Live OpenAI billing unavailable",
             scope_label=_scope_label(project_id, False),
+            project_id=project_id,
+            window_start=start_time,
+            window_end=end_time,
+            window_start_label=window_start_label,
+            fetched_at=end_time,
+            fetched_at_label=fetched_at_label,
+            window_label=resolved_window_label,
             error=_sanitize_error(str(exc)),
         )
 
@@ -263,6 +326,14 @@ def fetch_openai_billing_snapshot(
         scope_label=_scope_label(project_id, True),
         cost=cost,
         usage=usage,
+        project_id=project_id,
+        window_start=start_time,
+        window_end=end_time,
+        window_start_label=window_start_label,
+        fetched_at=end_time,
+        fetched_at_label=fetched_at_label,
+        is_project_scoped=bool(project_id),
+        window_label=resolved_window_label,
     )
     if ttl > 0 and session is None:
         _OPENAI_BILLING_CACHE[cache_key] = (current_time, snapshot)
@@ -278,7 +349,7 @@ def calculate_provider_billed_spend(
     hosting = max(0.0, float(hosting_billed_usd or 0.0))
     tavily = max(0.0, float(tavily_billing.actual_billed_usd or 0.0))
     openai_billed_usd = None
-    if openai_billing.available and openai_billing.cost.currency == "usd":
+    if openai_billing.available and openai_billing.is_project_scoped and openai_billing.cost.currency == "usd":
         openai_billed_usd = max(0.0, float(openai_billing.cost.total or 0.0))
 
     is_complete = openai_billed_usd is not None
@@ -327,6 +398,26 @@ def _safe_float(value: Any) -> float:
         return float(value or 0.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _start_date_to_epoch(start_date: str, *, fallback_end_time: int, fallback_days: int) -> int:
+    try:
+        parsed = datetime.strptime(str(start_date), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp())
+    except (TypeError, ValueError):
+        return int(fallback_end_time) - (max(1, int(fallback_days or 1)) * 86_400)
+
+
+def _format_epoch_date(value: int | None) -> str | None:
+    if value is None:
+        return None
+    return datetime.fromtimestamp(int(value), timezone.utc).date().isoformat()
+
+
+def _format_epoch_datetime(value: int | None) -> str | None:
+    if value is None:
+        return None
+    return datetime.fromtimestamp(int(value), timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _scope_label(project_id: str | None, filtered: bool) -> str:
