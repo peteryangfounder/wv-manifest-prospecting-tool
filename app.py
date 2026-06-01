@@ -323,6 +323,33 @@ CUSTOM_CSS = """
     font-size: 1.16rem;
     white-space: nowrap;
   }
+  .billing-detail-grid {
+    border-top: 1px solid #edf0f4;
+    display: grid;
+    gap: 0.55rem 1rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-top: 1rem;
+    padding-top: 0.85rem;
+  }
+  .billing-detail-label {
+    color: #697386;
+    font-size: 0.78rem;
+    line-height: 1.3;
+  }
+  .billing-detail-value {
+    color: #202332;
+    font-size: 0.88rem;
+    font-weight: 720;
+    line-height: 1.35;
+    margin-top: 0.1rem;
+    overflow-wrap: anywhere;
+  }
+  .billing-note {
+    color: #697386;
+    font-size: 0.86rem;
+    line-height: 1.45;
+    margin-top: 0.8rem;
+  }
   .summary-card {
     background: #ffffff;
     border: 1px solid #e5e9ef;
@@ -609,6 +636,9 @@ CUSTOM_CSS = """
     .cost-hero-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+    .billing-detail-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
     .prospect-card {
       grid-template-columns: minmax(12rem, 1fr) minmax(8rem, 0.7fr);
     }
@@ -639,6 +669,9 @@ CUSTOM_CSS = """
       display: none;
     }
     .cost-hero-grid {
+      grid-template-columns: 1fr;
+    }
+    .billing-detail-grid {
       grid-template-columns: 1fr;
     }
     .prospect-card {
@@ -711,6 +744,14 @@ def _cache_status(snapshot: OpenAIBillingSnapshot) -> str:
     if not snapshot.available:
         return "unavailable"
     return "cache" if snapshot.from_cache else "fresh API fetch"
+
+
+def _billing_status(snapshot: OpenAIBillingSnapshot) -> str:
+    if snapshot.available and snapshot.is_project_scoped:
+        return "Live project data"
+    if snapshot.available:
+        return "Org-level only"
+    return "Unavailable"
 
 
 def _pct(part: int | float | None, whole: int | float | None) -> str:
@@ -889,24 +930,35 @@ def _render_cost_hero(
     last_run_local_openai_estimate: float,
     model_name: str,
 ) -> None:
-    items = [
-        ("Actual provider-billed spend, Wittington project lifetime to date", _format_billed_total(provider_spend)),
+    cost_items = [
+        ("All-time billed cost", _format_billed_total(provider_spend)),
+        (f"Billed cost, {recent_openai_billing.window_label}", _format_openai_billed(recent_openai_billing)),
+        ("Local OpenAI estimate", _format_currency(local_openai_estimate)),
+    ]
+    usage_items = [
+        ("OpenAI tokens used", _format_int(total_tokens)),
         (
-            f"Actual provider-billed spend, {recent_openai_billing.window_label}",
-            _format_openai_billed(recent_openai_billing),
-        ),
-        ("Local OpenAI token estimate", _format_currency(local_openai_estimate)),
-        ("OpenAI tokens tracked", _format_int(total_tokens)),
-        (
-            "Tavily free credits consumed",
-            f"{_format_int(tavily_billing.credits_used)} / {_format_int(tavily_billing.included_monthly_credits)}",
+            "Tavily credits used",
+            f"{_format_int(tavily_billing.credits_used)} of {_format_int(tavily_billing.included_monthly_credits)} included",
         ),
         ("OpenAI scoring calls", _format_int(openai_calls)),
-        ("Last run estimate", f"{_format_int(last_api_calls)} calls / {_format_currency(last_run_local_openai_estimate)}"),
+        ("Last run API calls", _format_int(last_api_calls)),
+        ("Last run local estimate", _format_currency(last_run_local_openai_estimate)),
     ]
-    body = ["<div class='cost-hero'><div class='cost-hero-title'>Provider billing and local estimates</div><div class='cost-hero-grid'>"]
-    for label, value in items:
-        value_class = "cost-hero-value compact" if label == "Last run estimate" else "cost-hero-value"
+    detail_items = [
+        ("Source", lifetime_openai_billing.source_label),
+        ("Project", lifetime_openai_billing.project_id or "None"),
+        ("Billing start", lifetime_openai_billing.window_start_label or "Unavailable"),
+        ("Last fetched", lifetime_openai_billing.fetched_at_label or "Unavailable"),
+        ("Data status", _cache_status(lifetime_openai_billing)),
+        ("Scope", lifetime_openai_billing.scope_label),
+        ("Tavily plan", f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"),
+        ("Hosting", _format_currency(provider_spend.hosting_billed_usd)),
+    ]
+
+    body = ["<div class='cost-hero'><div class='cost-hero-title'>API usage and cost</div><div class='cost-hero-grid'>"]
+    for label, value in [*cost_items, *usage_items]:
+        value_class = "cost-hero-value compact" if len(str(value)) > 18 else "cost-hero-value"
         body.append(
             "<div>"
             f"<div class='cost-hero-label'>{html.escape(_clean_ui_text(label))}</div>"
@@ -914,19 +966,15 @@ def _render_cost_hero(
             "</div>"
         )
     body.append("</div>")
-    body.append(
-        "<div class='quiet-note'>Actual provider-billed spend is the reimbursement-relevant figure. "
-        f"Live billing source: {html.escape(_clean_ui_text(lifetime_openai_billing.source_label))}. "
-        f"Project ID used: {html.escape(_clean_ui_text(lifetime_openai_billing.project_id or 'None'))}. "
-        f"Billing window start date: {html.escape(_clean_ui_text(lifetime_openai_billing.window_start_label or 'Unavailable'))}. "
-        f"Last fetched: {html.escape(_clean_ui_text(lifetime_openai_billing.fetched_at_label or 'Unavailable'))}. "
-        f"Fetch status: {html.escape(_clean_ui_text(_cache_status(lifetime_openai_billing)))}. "
-        f"Scope: {html.escape(_clean_ui_text(lifetime_openai_billing.scope_label))}. "
-        f"Tavily plan: {html.escape(_clean_ui_text(tavily_billing.plan_name))}; "
-        f"Tavily billed spend: {html.escape(_format_currency(tavily_billing.actual_billed_usd))}. "
-        f"Streamlit Community Cloud hosting: {html.escape(_format_currency(provider_spend.hosting_billed_usd))}. "
-        f"Model for local estimate: {html.escape(_clean_ui_text(model_name))}.</div>"
-    )
+    body.append("<div class='billing-detail-grid'>")
+    for label, value in detail_items:
+        body.append(
+            "<div>"
+            f"<div class='billing-detail-label'>{html.escape(_clean_ui_text(label))}</div>"
+            f"<div class='billing-detail-value'>{html.escape(_clean_ui_text(value))}</div>"
+            "</div>"
+        )
+    body.append("</div>")
     if (
         lifetime_openai_billing.available
         and lifetime_openai_billing.is_project_scoped
@@ -935,16 +983,16 @@ def _render_cost_hero(
         and local_openai_estimate > 0
     ):
         body.append(
-            "<div class='quiet-note'>Provider-billed cost is the source of truth. "
-            "The local estimate is a token-rate estimate and may differ because it is not the billing ledger.</div>"
+            "<div class='billing-note'>Provider-billed cost is the reimbursement total. "
+            f"The local estimate uses configured token rates for {html.escape(_clean_ui_text(model_name))} and is for planning only.</div>"
         )
     if not lifetime_openai_billing.available:
         body.append(
-            "<div class='quiet-note'>Live OpenAI billing unavailable. The local OpenAI token estimate is shown for planning only and is not an invoice.</div>"
+            "<div class='billing-note'>Live OpenAI billing unavailable. The local estimate is shown for planning only.</div>"
         )
     elif not lifetime_openai_billing.is_project_scoped:
         body.append(
-            "<div class='quiet-note'>Live OpenAI billing returned organization-level data. It is labelled as org-wide context and is not used as the Wittington project reimbursement total.</div>"
+            "<div class='billing-note'>OpenAI returned organization-level billing. It is not used in the Wittington project reimbursement total.</div>"
         )
     body.append("</div>")
     st.markdown("".join(body), unsafe_allow_html=True)
@@ -1656,26 +1704,21 @@ with summary_cols[0]:
     _render_summary_card(
         "Source and prospect status",
         [
-            ("Source rows", f"{_format_int(metrics['raw_companies'])} raw / {_format_int(metrics['unique_companies'])} unique"),
-            ("Candidates after rule screen", f"{_format_int(candidate_count)} ({_pct(candidate_count, metrics['unique_companies'])})"),
+            ("Source rows", f"{_format_int(metrics['raw_companies'])} raw, {_format_int(metrics['unique_companies'])} unique"),
+            ("Candidates after rule screen", f"{_format_int(candidate_count)} ({_pct(candidate_count, metrics['unique_companies'])} of unique)"),
             ("API-scored companies", _format_int(metrics["openai_scored"])),
             ("Verified prospects shown", _format_int(len(prospects))),
         ],
     )
 with summary_cols[1]:
     _render_summary_card(
-        "Billing configuration",
+        "Cost controls",
         [
-            ("OpenAI billing source", lifetime_openai_billing.source_label),
-            ("OpenAI project ID", str(lifetime_openai_billing.project_id or "None")),
-            ("Billing window start", str(lifetime_openai_billing.window_start_label or "Unavailable")),
-            ("Last fetched", str(lifetime_openai_billing.fetched_at_label or "Unavailable")),
-            ("Fetch status", _cache_status(lifetime_openai_billing)),
-            ("OpenAI scope", lifetime_openai_billing.scope_label),
-            ("Tavily plan", str(tavily_billing.plan_name)),
-            ("Tavily pay-as-you-go", "enabled" if tavily_billing.pay_as_you_go_enabled else "disabled"),
-            ("Tavily free credits remaining", _format_int(tavily_billing.free_credits_remaining)),
-            ("Streamlit Community Cloud hosting", _format_currency(provider_spend.hosting_billed_usd)),
+            ("OpenAI billing", _billing_status(lifetime_openai_billing)),
+            ("Billing start", str(lifetime_openai_billing.window_start_label or "Unavailable")),
+            ("Tavily billing", f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"),
+            ("Tavily credits remaining", _format_int(tavily_billing.free_credits_remaining)),
+            ("Hosting cost", _format_currency(provider_spend.hosting_billed_usd)),
         ],
     )
 
