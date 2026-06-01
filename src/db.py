@@ -93,6 +93,9 @@ def init_db(conn: sqlite3.Connection) -> None:
             tavily_calls INTEGER DEFAULT 0,
             openai_calls INTEGER DEFAULT 0,
             cache_hits INTEGER DEFAULT 0,
+            prompt_tokens INTEGER DEFAULT 0,
+            completion_tokens INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
             estimated_cost_usd REAL,
             notes TEXT
         );
@@ -105,6 +108,9 @@ def init_db(conn: sqlite3.Connection) -> None:
 def migrate_schema(conn: sqlite3.Connection) -> None:
     """Apply additive migrations for SQLite databases created by older app versions."""
     _ensure_column(conn, "companies", "high_priority_enrichment", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "runs", "prompt_tokens", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "runs", "completion_tokens", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "runs", "total_tokens", "INTEGER DEFAULT 0")
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -138,6 +144,9 @@ def finish_run(conn: sqlite3.Connection, run_id: int, **values: Any) -> None:
         "tavily_calls",
         "openai_calls",
         "cache_hits",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
         "estimated_cost_usd",
         "notes",
     }
@@ -484,6 +493,32 @@ def metrics(conn: sqlite3.Connection) -> dict[str, Any]:
     scored_count = conn.execute("SELECT COUNT(*) FROM scores").fetchone()[0]
     openai_count = conn.execute("SELECT COUNT(*) FROM scores WHERE provider = 'openai'").fetchone()[0]
     last_run = conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+    run_totals = conn.execute(
+        """
+        SELECT
+          COALESCE(SUM(tavily_calls), 0) AS tavily_calls,
+          COALESCE(SUM(openai_calls), 0) AS openai_calls,
+          COALESCE(SUM(cache_hits), 0) AS cache_hits,
+          COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+          COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+          COALESCE(SUM(total_tokens), 0) AS total_tokens,
+          COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
+        FROM runs
+        """
+    ).fetchone()
+    cost_by_stage = conn.execute(
+        """
+        SELECT
+          run_type,
+          COALESCE(SUM(tavily_calls), 0) AS tavily_calls,
+          COALESCE(SUM(openai_calls), 0) AS openai_calls,
+          COALESCE(SUM(total_tokens), 0) AS total_tokens,
+          COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
+        FROM runs
+        GROUP BY run_type
+        ORDER BY run_type
+        """
+    ).fetchall()
     return {
         "raw_companies": int(row["raw_companies"] or 0),
         "unique_companies": int(row["unique_companies"] or 0),
@@ -493,4 +528,6 @@ def metrics(conn: sqlite3.Connection) -> dict[str, Any]:
         "scored": int(scored_count or 0),
         "openai_scored": int(openai_count or 0),
         "last_run": dict(last_run) if last_run else None,
+        "run_totals": dict(run_totals) if run_totals else {},
+        "cost_by_stage": [dict(row) for row in cost_by_stage],
     }

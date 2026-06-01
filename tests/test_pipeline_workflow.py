@@ -14,6 +14,9 @@ def _settings(tmp_path: Path) -> Settings:
         max_enrich=7,
         max_score=5,
         tavily_max_results=1,
+        openai_input_cost_per_1m_tokens=0.15,
+        openai_output_cost_per_1m_tokens=0.60,
+        tavily_cost_per_call_usd=0.001,
     )
 
 

@@ -21,6 +21,12 @@ class PipelineResult:
     counts: dict[str, Any]
 
 
+def _estimate_openai_cost(settings: Settings, prompt_tokens: int, completion_tokens: int) -> float:
+    input_cost = (prompt_tokens / 1_000_000) * settings.openai_input_cost_per_1m_tokens
+    output_cost = (completion_tokens / 1_000_000) * settings.openai_output_cost_per_1m_tokens
+    return input_cost + output_cost
+
+
 def load_attendees(conn, settings: Settings) -> PipelineResult:
     run_id = db.start_run(conn, "load_attendees")
     raw_names, metadata = get_attendee_names(settings.manifest_url)
@@ -82,7 +88,13 @@ def run_deterministic_classification(conn) -> PipelineResult:
     )
 
 
-def enrich_candidates(conn, settings: Settings, limit: int | None = None, force: bool = False) -> PipelineResult:
+def enrich_candidates(
+    conn,
+    settings: Settings,
+    limit: int | None = None,
+    force: bool = False,
+    progress_callback=None,
+) -> PipelineResult:
     limit = limit or settings.max_enrich
     run_id = db.start_run(conn, "tavily_enrichment")
     if not settings.tavily_api_key:
@@ -100,29 +112,50 @@ def enrich_candidates(conn, settings: Settings, limit: int | None = None, force:
     errors = 0
     cache_hits = 0
 
-    for company in companies:
+    for index, company in enumerate(companies, start=1):
         result = _enrich_one_company(conn, settings, company, force=force, client=client)
         calls += result["api_call"]
         enriched += result["enriched"]
         errors += result["error_count"]
         cache_hits += result["cache_hit"]
+        if progress_callback:
+            progress_callback(
+                index,
+                len(companies),
+                result,
+                {"tavily_calls": calls, "enriched": enriched, "errors": errors, "cache_hits": cache_hits},
+            )
 
+    estimated_cost_usd = calls * settings.tavily_cost_per_call_usd
     db.finish_run(
         conn,
         run_id,
         enriched_count=enriched,
         tavily_calls=calls,
         cache_hits=cache_hits,
+        estimated_cost_usd=estimated_cost_usd,
         notes=f"Errors: {errors}. Force refresh: {force}.",
     )
     return PipelineResult(
         "tavily_enrichment",
-        f"Made {calls:,} Tavily calls and stored {enriched:,} successful enrichments.",
-        {"tavily_calls": calls, "enriched": enriched, "errors": errors, "cache_hits": cache_hits},
+        f"Made {calls:,} Tavily calls and stored {enriched:,} successful enrichments. Estimated search spend: ${estimated_cost_usd:.4f}.",
+        {
+            "tavily_calls": calls,
+            "enriched": enriched,
+            "errors": errors,
+            "cache_hits": cache_hits,
+            "estimated_cost_usd": estimated_cost_usd,
+        },
     )
 
 
-def score_enriched_candidates(conn, settings: Settings, limit: int | None = None, force: bool = False) -> PipelineResult:
+def score_enriched_candidates(
+    conn,
+    settings: Settings,
+    limit: int | None = None,
+    force: bool = False,
+    progress_callback=None,
+) -> PipelineResult:
     limit = limit or settings.max_score
     run_id = db.start_run(conn, "openai_scoring")
     if not settings.openai_api_key:
@@ -138,13 +171,37 @@ def score_enriched_candidates(conn, settings: Settings, limit: int | None = None
     scored = 0
     errors = 0
     cache_hits = 0
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    estimated_cost_usd = 0.0
 
-    for company in companies:
+    for index, company in enumerate(companies, start=1):
         result = _score_one_company(conn, settings, company, force=force)
         calls += result["api_call"]
         scored += result["scored"]
         errors += result["error_count"]
         cache_hits += result["cache_hit"]
+        prompt_tokens += result.get("prompt_tokens", 0)
+        completion_tokens += result.get("completion_tokens", 0)
+        total_tokens += result.get("total_tokens", 0)
+        estimated_cost_usd += result.get("estimated_cost_usd", 0.0)
+        if progress_callback:
+            progress_callback(
+                index,
+                len(companies),
+                result,
+                {
+                    "openai_calls": calls,
+                    "scored": scored,
+                    "errors": errors,
+                    "cache_hits": cache_hits,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "estimated_cost_usd": estimated_cost_usd,
+                },
+            )
 
     db.finish_run(
         conn,
@@ -152,12 +209,25 @@ def score_enriched_candidates(conn, settings: Settings, limit: int | None = None
         scored_count=scored,
         openai_calls=calls,
         cache_hits=cache_hits,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        estimated_cost_usd=estimated_cost_usd,
         notes=f"Errors: {errors}. Force refresh: {force}. Model: {settings.openai_model}.",
     )
     return PipelineResult(
         "openai_scoring",
-        f"Made {calls:,} OpenAI calls and stored {scored:,} structured scores.",
-        {"openai_calls": calls, "scored": scored, "errors": errors, "cache_hits": cache_hits},
+        f"Made {calls:,} OpenAI calls and stored {scored:,} structured scores. Tokens: {total_tokens:,}. Estimated model spend: ${estimated_cost_usd:.4f}.",
+        {
+            "openai_calls": calls,
+            "scored": scored,
+            "errors": errors,
+            "cache_hits": cache_hits,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "estimated_cost_usd": estimated_cost_usd,
+        },
     )
 
 
@@ -260,10 +330,20 @@ def _score_one_company(
             "error_count": 1,
             "status": "missing_api_key",
             "company_name": company["canonical_name"],
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "estimated_cost_usd": 0.0,
         }
 
     try:
         score = classify_with_openai(company, settings.openai_api_key, settings.openai_model)
+        usage = (score.get("raw_json") or {}).get("usage") or {}
+        prompt_tokens = int(usage.get("prompt_tokens") or 0)
+        completion_tokens = int(usage.get("completion_tokens") or 0)
+        total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
+        estimated_cost_usd = _estimate_openai_cost(settings, prompt_tokens, completion_tokens)
+        score["raw_json"]["estimated_cost_usd"] = estimated_cost_usd
         db.save_score(conn, company["id"], score, provider="openai")
         return {
             "api_call": 1,
@@ -272,6 +352,10 @@ def _score_one_company(
             "error_count": 0,
             "status": "success",
             "company_name": company["canonical_name"],
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "estimated_cost_usd": estimated_cost_usd,
         }
     except Exception as exc:  # noqa: BLE001 - keep partial scoring runs usable.
         fallback = baseline_score(company)
@@ -284,6 +368,10 @@ def _score_one_company(
             "error_count": 1,
             "status": "error",
             "company_name": company["canonical_name"],
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "estimated_cost_usd": 0.0,
         }
 
 

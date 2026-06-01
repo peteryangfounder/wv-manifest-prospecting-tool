@@ -16,6 +16,9 @@ def test_verify_cache_reuse_uses_sqlite_without_paid_calls(tmp_path: Path) -> No
         max_enrich=1,
         max_score=1,
         tavily_max_results=1,
+        openai_input_cost_per_1m_tokens=0.15,
+        openai_output_cost_per_1m_tokens=0.60,
+        tavily_cost_per_call_usd=0.001,
     )
     conn = db.connect(settings.database_path)
     db.init_db(conn)

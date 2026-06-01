@@ -36,6 +36,16 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
 def _env_path(name: str, default: Path) -> Path:
     value = os.getenv(name)
     if not value:
@@ -56,6 +66,9 @@ class Settings:
     max_enrich: int
     max_score: int
     tavily_max_results: int
+    openai_input_cost_per_1m_tokens: float
+    openai_output_cost_per_1m_tokens: float
+    tavily_cost_per_call_usd: float
 
 
 def get_settings() -> Settings:
@@ -69,4 +82,7 @@ def get_settings() -> Settings:
         max_enrich=_env_int("MAX_ENRICH", 75),
         max_score=_env_int("MAX_SCORE", 75),
         tavily_max_results=_env_int("TAVILY_MAX_RESULTS", 3),
+        openai_input_cost_per_1m_tokens=_env_float("OPENAI_INPUT_COST_PER_1M_TOKENS", 0.15),
+        openai_output_cost_per_1m_tokens=_env_float("OPENAI_OUTPUT_COST_PER_1M_TOKENS", 0.60),
+        tavily_cost_per_call_usd=_env_float("TAVILY_COST_PER_CALL_USD", 0.001),
     )

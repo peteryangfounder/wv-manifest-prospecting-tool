@@ -19,6 +19,9 @@ def test_generic_placeholders_are_excluded_from_paid_enrichment(tmp_path: Path) 
         max_enrich=10,
         max_score=10,
         tavily_max_results=1,
+        openai_input_cost_per_1m_tokens=0.15,
+        openai_output_cost_per_1m_tokens=0.60,
+        tavily_cost_per_call_usd=0.001,
     )
     conn = db.connect(settings.database_path)
     db.init_db(conn)

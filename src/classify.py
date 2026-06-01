@@ -95,4 +95,13 @@ def classify_with_openai(company: dict[str, Any], api_key: str, model: str) -> d
     )
     raw_content = response.choices[0].message.content or "{}"
     payload = json.loads(raw_content)
-    return normalize_llm_score(payload, company.get("deterministic_type"))
+    normalized = normalize_llm_score(payload, company.get("deterministic_type"))
+    usage = response.usage
+    if usage:
+        normalized["raw_json"]["usage"] = {
+            "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+            "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+            "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+        }
+    normalized["raw_json"]["model"] = model
+    return normalized
