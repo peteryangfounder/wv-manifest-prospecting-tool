@@ -14,7 +14,7 @@ The product thesis is simple: use code for retrieval and storage, use determinis
 - Uses Tavily search as the external API enrichment layer for likely candidates.
 - Uses OpenAI for structured scoring only after Tavily evidence exists.
 - Separates baseline screening from verified prospects so un-enriched keyword matches are not presented as final investment-quality leads.
-- Presents a Streamlit dashboard with metrics, filters, source evidence, CSV export, and a sortable ranked table.
+- Presents a focused Streamlit dashboard with verified prospects, readable analytics, CSV export, and the full ranked table.
 
 ## Why This Architecture
 
@@ -82,13 +82,11 @@ The app still opens without API keys and will produce deterministic baseline sco
 streamlit run app.py
 ```
 
-Then use the sidebar in this order:
+Then use the sidebar's three-step workflow:
 
 1. **Load & classify companies** - scrapes/parses the Manifest list and builds the high-priority queue with no paid API calls.
 2. **Generate verified prospects** - runs Tavily enrichment and OpenAI scoring for the high-priority queue using the configured limits.
 3. **Verify cache reuse** - proves cached Tavily/OpenAI records are reused without repeat paid calls.
-
-The old individual stage buttons are still available under **Advanced controls** for debugging or partial reruns.
 
 For a command-line run:
 
@@ -122,7 +120,7 @@ The high-priority queue requires stronger startup or technology evidence: AI, ro
 
 The app intentionally distinguishes the full-list baseline screen from evidence-backed prospect ranking. Baseline-only rows remain visible in the ranked pipeline as `Baseline only` / `Not cached`, and their displayed score is capped so keyword-only matches do not outrank companies with real evidence.
 
-The Overview `Top prospects` table only shows verified prospects: companies with cached Tavily enrichment and cached OpenAI scoring. If no such rows exist yet, the app shows an empty state asking the reviewer to run enrichment and scoring rather than presenting low-confidence baseline rows as investment-ready leads.
+The `Verified prospects` table only shows companies with cached Tavily enrichment and cached OpenAI scoring. If no such rows exist yet, the app shows an empty state asking the reviewer to run enrichment and scoring rather than presenting low-confidence baseline rows as investment-ready leads.
 
 ## Caching And Cost Control
 
@@ -131,16 +129,16 @@ The Overview `Top prospects` table only shows verified prospects: companies with
 - Tavily enrichments are keyed by company/provider.
 - OpenAI scores are keyed by company and marked with provider `openai`.
 - Paid Tavily/OpenAI runs default to the high-priority queue, not the broader candidate pool.
-- The UI defaults to bounded `MAX_ENRICH` and `MAX_SCORE` values.
-- The deterministic baseline gives a full-list screening view even before API keys are configured, but the Overview top-prospect list is reserved for evidence-backed Tavily/OpenAI results.
-- A force-refresh checkbox exists, but normal reruns reuse cached rows.
+- The UI defaults to bounded `MAX_ENRICH` and `MAX_SCORE` values from environment configuration.
+- The deterministic baseline gives a full-list screening view even before API keys are configured, but the verified-prospect list is reserved for evidence-backed Tavily/OpenAI results.
+- Normal UI reruns use cached rows; force-refresh behavior is reserved for code/CLI use.
 
 ### Reviewer Cache Verification
 
 To prove reruns do not redo paid work:
 
-1. Run a small Tavily enrichment pass, for example with `Max Tavily enrichments = 1`.
-2. Run a small OpenAI scoring pass, for example with `Max OpenAI scores = 1`.
+1. Set small `MAX_ENRICH` and `MAX_SCORE` values if you want a tiny run.
+2. Click **Generate verified prospects** after loading/classifying companies.
 3. Click **Verify cache reuse** in the sidebar.
 4. Confirm the success message says the stored enrichment and scoring were reused and that the dashboard shows `Cache hits` increased while `Last API calls` remains `0`.
 

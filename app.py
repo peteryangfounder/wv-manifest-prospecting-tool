@@ -4,15 +4,15 @@ import html
 import json
 from collections import Counter
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
 from src import db
-from src.config import PROJECT_ROOT, get_settings
+from src.config import get_settings
 from src.pipeline import (
     enrich_candidates,
     load_attendees,
-    run_default_pipeline,
     run_deterministic_classification,
     score_enriched_candidates,
     verify_cache_reuse,
@@ -51,47 +51,21 @@ CUSTOM_CSS = """
   }
   .wv-subtitle {
     color: #697386;
-    font-size: 1rem;
+    font-size: 1.02rem;
     margin: 0.45rem 0 0 0;
     max-width: 760px;
   }
-  .workflow-strip {
-    align-items: center;
-    display: grid;
-    gap: 0.5rem;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    margin: 1rem 0 1.1rem 0;
-  }
-  .workflow-step {
-    background: #f6f8fb;
-    border: 1px solid #e5e9ef;
-    border-radius: 8px;
-    color: #697386;
-    font-size: 0.86rem;
-    font-weight: 680;
-    padding: 0.62rem 0.72rem;
-  }
-  .workflow-step.done {
-    background: #edf8f1;
-    border-color: #cfe8d7;
-    color: #176c35;
-  }
-  .workflow-step.current {
-    background: #eef4ff;
-    border-color: #cfe0ff;
-    color: #235ab7;
-  }
   .metric-grid {
     display: grid;
-    gap: 0.75rem;
+    gap: 0.85rem;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    margin: 1rem 0 1.2rem 0;
+    margin: 1.05rem 0 1.4rem 0;
   }
   .metric-card {
     background: #ffffff;
     border: 1px solid #e5e9ef;
     border-radius: 8px;
-    padding: 0.85rem 0.9rem;
+    padding: 1rem;
   }
   .metric-label {
     color: #697386;
@@ -154,43 +128,14 @@ CUSTOM_CSS = """
   }
   .section-label {
     color: #202332;
-    font-size: 1.05rem;
+    font-size: 1.12rem;
     font-weight: 740;
-    margin: 0.3rem 0 0.6rem 0;
+    margin: 1.1rem 0 0.55rem 0;
   }
   .quiet-note {
     color: #697386;
     font-size: 0.88rem;
     margin-top: -0.15rem;
-  }
-  .detail-box {
-    background: #ffffff;
-    border: 1px solid #e5e9ef;
-    border-radius: 8px;
-    padding: 1rem;
-  }
-  .detail-title {
-    color: #202332;
-    font-size: 1.15rem;
-    font-weight: 760;
-    margin: 0 0 0.25rem 0;
-  }
-  .detail-text {
-    color: #313647;
-    font-size: 0.95rem;
-    line-height: 1.5;
-  }
-  .sidebar-badge {
-    background: #f6f8fb;
-    border: 1px solid #e5e9ef;
-    border-radius: 8px;
-    color: #313647;
-    font-size: 0.83rem;
-    margin-bottom: 0.45rem;
-    padding: 0.48rem 0.6rem;
-  }
-  .sidebar-badge strong {
-    color: #202332;
   }
   section[data-testid="stSidebar"] .stButton > button {
     min-height: 2.7rem;
@@ -214,15 +159,9 @@ CUSTOM_CSS = """
     .metric-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
-    .workflow-strip {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
   }
   @media (max-width: 700px) {
     .metric-grid {
-      grid-template-columns: 1fr;
-    }
-    .workflow-strip {
       grid-template-columns: 1fr;
     }
   }
@@ -305,27 +244,6 @@ def _render_metric_cards(cards: list[tuple[str, str, str]]) -> None:
     st.markdown("".join(body), unsafe_allow_html=True)
 
 
-def _render_workflow_strip(metrics: dict, verified_count: int) -> None:
-    loaded = int(metrics.get("unique_companies") or 0) > 0
-    prioritized = int(metrics.get("high_priority_queue") or 0) > 0
-    scored = int(metrics.get("openai_scored") or 0) > 0
-    reviewed = verified_count > 0
-
-    steps = [
-        ("1. Load list", loaded),
-        ("2. Prioritize queue", prioritized),
-        ("3. Enrich + score", scored),
-        ("4. Review prospects", reviewed),
-    ]
-    next_index = next((index for index, (_, done) in enumerate(steps) if not done), len(steps))
-    body = ["<div class='workflow-strip'>"]
-    for index, (label, done) in enumerate(steps):
-        state = "done" if done else "current" if index == next_index else ""
-        body.append(f"<div class='workflow-step {state}'>{html.escape(label)}</div>")
-    body.append("</div>")
-    st.markdown("".join(body), unsafe_allow_html=True)
-
-
 def _score_band_frame(frame: pd.DataFrame) -> pd.DataFrame:
     labels = ["0-19", "20-39", "40-59", "60-79", "80-100"]
     if frame.empty:
@@ -361,14 +279,30 @@ def _type_frame(frame: pd.DataFrame, limit: int = 8) -> pd.DataFrame:
     return counts.rename_axis("Type").reset_index(name="Companies")
 
 
-def _run_and_store(label: str, func, *, level: str = "success"):
-    with st.spinner(label):
-        result = func()
-    st.session_state["last_action"] = {
-        "message": result.message,
-        "level": level,
-    }
-    return result
+def _horizontal_bar_chart(
+    data: pd.DataFrame,
+    label_column: str,
+    value_column: str,
+    *,
+    height: int = 260,
+    sort: str | list[str] = "-x",
+) -> None:
+    chart = (
+        alt.Chart(data)
+        .mark_bar(color="#0b72d0", cornerRadiusEnd=3)
+        .encode(
+            x=alt.X(f"{value_column}:Q", title=None, axis=alt.Axis(grid=True, labelColor="#697386")),
+            y=alt.Y(
+                f"{label_column}:N",
+                sort=sort,
+                title=None,
+                axis=alt.Axis(labelLimit=260, labelColor="#697386"),
+            ),
+            tooltip=[alt.Tooltip(f"{label_column}:N", title=label_column), alt.Tooltip(f"{value_column}:Q", title=value_column)],
+        )
+        .properties(height=height)
+    )
+    st.altair_chart(chart, use_container_width=True)
 
 
 def _run_sequence_and_store(label: str, func, *, success_message: str | None = None, level: str = "success"):
@@ -394,18 +328,14 @@ def _generate_verified_prospects(enrich_limit: int, score_limit: int, force: boo
 
 
 settings, conn = _connect()
-try:
-    display_database_path = settings.database_path.relative_to(PROJECT_ROOT)
-except ValueError:
-    display_database_path = settings.database_path
 
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 with st.sidebar:
     st.markdown("### Workflow")
-    st.caption("Run the sourcing flow in order.")
+    st.caption("Three steps. The first is free; the second uses the cached high-priority queue.")
 
-    if st.button("1. Load & classify companies", type="primary", width="stretch"):
+    if st.button("1. Load & classify", type="primary", width="stretch"):
         _run_sequence_and_store(
             "Loading and classifying Manifest companies...",
             _load_and_classify_companies,
@@ -413,12 +343,10 @@ with st.sidebar:
         )
 
     if st.button("2. Generate verified prospects", width="stretch"):
-        max_enrich_for_button = int(st.session_state.get("max_enrich", settings.max_enrich))
-        max_score_for_button = int(st.session_state.get("max_score", settings.max_score))
-        force_refresh_for_button = bool(st.session_state.get("force_refresh", False))
         _run_sequence_and_store(
             "Generating verified prospects...",
-            lambda: _generate_verified_prospects(max_enrich_for_button, max_score_for_button, force_refresh_for_button),
+            lambda: _generate_verified_prospects(settings.max_enrich, settings.max_score, False),
+            success_message="Verified prospect generation finished.",
         )
 
     if st.button("3. Verify cache reuse", width="stretch"):
@@ -433,101 +361,14 @@ with st.sidebar:
 
     st.caption(
         f"Tavily {'configured' if settings.tavily_api_key else 'missing'} · "
-        f"OpenAI {'configured' if settings.openai_api_key else 'missing'}"
+        f"OpenAI {'configured' if settings.openai_api_key else 'missing'} · "
+        f"Limits {settings.max_enrich}/{settings.max_score}"
     )
-
-    with st.expander("How this works", expanded=False):
-        st.write("Load the list, generate evidence-backed prospects, then review the verified companies.")
-
-    with st.expander("Cost controls", expanded=False):
-        st.number_input(
-            "Max Tavily enrichments",
-            min_value=1,
-            max_value=500,
-            value=settings.max_enrich,
-            step=5,
-            key="max_enrich",
-        )
-        st.number_input(
-            "Max OpenAI scores",
-            min_value=1,
-            max_value=500,
-            value=settings.max_score,
-            step=5,
-            key="max_score",
-        )
-        st.checkbox("Force refresh cached API records", value=False, key="force_refresh")
-        st.caption("Normal runs reuse SQLite cache records and avoid repeat paid calls.")
-
-    with st.expander("Advanced controls", expanded=False):
-        st.caption(f"SQLite: `{display_database_path}`")
-        if st.button("Load Manifest list", width="stretch"):
-            _run_and_store("Loading attendee names...", lambda: load_attendees(conn, settings))
-
-        if st.button("Classify companies", width="stretch"):
-            _run_and_store("Classifying companies...", lambda: run_deterministic_classification(conn))
-
-        if st.button("Enrich with Tavily", width="stretch"):
-            max_enrich_for_button = int(st.session_state.get("max_enrich", settings.max_enrich))
-            force_refresh_for_button = bool(st.session_state.get("force_refresh", False))
-            _run_and_store(
-                "Enriching candidates...",
-                lambda: enrich_candidates(conn, settings, max_enrich_for_button, force_refresh_for_button),
-            )
-
-        if st.button("Score with OpenAI", width="stretch"):
-            max_score_for_button = int(st.session_state.get("max_score", settings.max_score))
-            force_refresh_for_button = bool(st.session_state.get("force_refresh", False))
-            _run_and_store(
-                "Scoring enriched candidates...",
-                lambda: score_enriched_candidates(conn, settings, max_score_for_button, force_refresh_for_button),
-            )
-
-        if st.button("Run staged pipeline", width="stretch"):
-            with st.spinner("Running staged pipeline..."):
-                results = run_default_pipeline(conn, settings)
-            message = " | ".join(result.message for result in results)
-            st.session_state["last_action"] = {"message": message, "level": "success"}
-
-        if st.button("Verify cache reuse", width="stretch"):
-            with st.spinner("Checking SQLite cache reuse..."):
-                result = verify_cache_reuse(conn, settings)
-            level = "success" if result.counts.get("verified") else "warning"
-            st.session_state["last_action"] = {"message": result.message, "level": level}
-            if result.counts.get("verified"):
-                st.success(result.message)
-            else:
-                st.warning(result.message)
-
-        if st.button("Initialize database", width="stretch"):
-            db.init_db(conn)
-            st.session_state["last_action"] = {"message": "Database initialized.", "level": "success"}
-            st.success("Database initialized.")
 
 rows = db.dashboard_rows(conn)
 frame = _rows_to_frame(rows)
 metrics = db.metrics(conn)
 verified_count = int(frame["is_verified_prospect"].sum()) if not frame.empty else 0
-
-startup_only = False
-priority_only = False
-min_score = 0
-selected_types: list[str] = []
-selected_sectors: list[str] = []
-selected_confidence: list[str] = []
-
-with st.sidebar:
-    if not frame.empty:
-        with st.expander("Filters", expanded=False):
-            startup_only = st.checkbox("Startup-likely only", value=False)
-            priority_only = st.checkbox("High-priority queue only", value=False)
-            min_score = st.slider("Minimum score", min_value=0, max_value=100, value=0)
-            type_options = sorted([value for value in frame["company_type"].dropna().unique().tolist() if value])
-            confidence_options = sorted([value for value in frame["confidence"].dropna().unique().tolist() if value])
-            all_sectors = sorted({tag for tags in frame["sector_tags"] for tag in (tags or [])})
-            selected_types = st.multiselect("Company type", type_options, default=[])
-            selected_sectors = st.multiselect("Sector", all_sectors, default=[])
-            selected_confidence = st.multiselect("Confidence", confidence_options, default=[])
 
 st.markdown(
     """
@@ -542,8 +383,6 @@ st.markdown(
 last_run = metrics.get("last_run") or {}
 last_api_calls = int(last_run.get("tavily_calls") or 0) + int(last_run.get("openai_calls") or 0)
 last_cache_hits = int(last_run.get("cache_hits") or 0)
-
-_render_workflow_strip(metrics, verified_count)
 
 last_action = st.session_state.get("last_action")
 if last_action:
@@ -581,164 +420,119 @@ else:
         ]
     )
 
-    with st.expander("Pipeline details", expanded=False):
-        detail_cols = st.columns(3)
-        detail_cols[0].metric("Broad candidates", _format_int(metrics["candidates"]))
-        detail_cols[1].metric("Tavily enriched", _format_int(metrics["enriched"]))
-        detail_cols[2].metric("OpenAI scored", _format_int(metrics["openai_scored"]))
-
-    filtered = frame[frame["display_score"] >= min_score].copy()
-    if startup_only:
-        filtered = filtered[filtered["is_startup_likely"] == 1]
-    if priority_only:
-        filtered = filtered[filtered["high_priority_enrichment"] == 1]
-    if selected_types:
-        filtered = filtered[filtered["company_type"].isin(selected_types)]
-    if selected_confidence:
-        filtered = filtered[filtered["confidence"].isin(selected_confidence)]
-    if selected_sectors:
-        selected = set(selected_sectors)
-        filtered = filtered[filtered["sector_tags"].apply(lambda tags: bool(selected.intersection(tags or [])))]
-
-    overview_tab, pipeline_tab, detail_tab = st.tabs(["Overview", "Ranked pipeline", "Company detail"])
-
-    with overview_tab:
-        top_prospects = verified_top_prospects(filtered, limit=10)
-        st.markdown("<div class='section-label'>Verified prospects</div>", unsafe_allow_html=True)
-        if top_prospects.empty:
-            st.info(VERIFIED_EMPTY_STATE)
-        else:
-            st.dataframe(
-                top_prospects[["rank", "canonical_name", "display_score", "company_type", "evidence_status", "confidence"]],
-                width="stretch",
-                hide_index=True,
-                column_config={
-                    "rank": st.column_config.NumberColumn("Rank", width="small"),
-                    "canonical_name": st.column_config.TextColumn("Company", width="medium"),
-                    "display_score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100),
-                    "company_type": st.column_config.TextColumn("Type"),
-                    "evidence_status": st.column_config.TextColumn("Evidence"),
-                    "confidence": st.column_config.TextColumn("Confidence"),
-                },
-            )
-
-        with st.expander("Pipeline analytics", expanded=False):
-            chart_cols = st.columns((1.1, 1, 1))
-
-            funnel_df = pd.DataFrame(
-                {
-                    "Stage": ["Unique", "High-priority", "Enriched", "OpenAI scored"],
-                    "Companies": [
-                        metrics["unique_companies"],
-                        metrics["high_priority_queue"],
-                        metrics["enriched"],
-                        metrics["openai_scored"],
-                    ],
-                }
-            )
-            chart_cols[0].markdown("<div class='section-label'>Pipeline funnel</div>", unsafe_allow_html=True)
-            chart_cols[0].bar_chart(funnel_df, x="Stage", y="Companies", height=220)
-
-            chart_cols[1].markdown("<div class='section-label'>Score distribution</div>", unsafe_allow_html=True)
-            chart_cols[1].bar_chart(_score_band_frame(filtered), x="Score band", y="Companies", height=220)
-
-            chart_cols[2].markdown("<div class='section-label'>Sector mix</div>", unsafe_allow_html=True)
-            chart_cols[2].bar_chart(_sector_frame(filtered), x="Sector", y="Companies", height=220)
-
-            st.markdown("<div class='section-label'>Company types</div>", unsafe_allow_html=True)
-            st.bar_chart(_type_frame(filtered), x="Type", y="Companies", height=220)
-
-    with pipeline_tab:
-        st.markdown("<div class='section-label'>Ranked pipeline</div>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div class='quiet-note'>Showing {_format_int(len(filtered))} of {_format_int(len(frame))} companies.</div>",
-            unsafe_allow_html=True,
-        )
-
-        display_columns = [
-            "rank",
-            "canonical_name",
-            "display_score",
-            "evidence_status",
-            "cache_status",
-            "company_type",
-            "is_startup_likely",
-            "high_priority_enrichment",
-            "sector_tags_text",
-            "wittington_edge",
-            "confidence",
-            "primary_source_url",
-        ]
+    top_prospects = verified_top_prospects(frame, limit=12)
+    st.markdown("<div class='section-label'>Verified prospects</div>", unsafe_allow_html=True)
+    if top_prospects.empty:
+        st.info(VERIFIED_EMPTY_STATE)
+    else:
         st.dataframe(
-            filtered[display_columns],
+            top_prospects[
+                [
+                    "rank",
+                    "canonical_name",
+                    "display_score",
+                    "company_type",
+                    "confidence",
+                    "evidence_summary",
+                    "primary_source_url",
+                ]
+            ],
             width="stretch",
+            height=430,
             hide_index=True,
             column_config={
                 "rank": st.column_config.NumberColumn("Rank", width="small"),
                 "canonical_name": st.column_config.TextColumn("Company", width="medium"),
                 "display_score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100),
-                "evidence_status": st.column_config.TextColumn("Evidence"),
-                "cache_status": st.column_config.TextColumn("Cache"),
-                "company_type": st.column_config.TextColumn("Type"),
-                "is_startup_likely": st.column_config.CheckboxColumn("Startup"),
-                "high_priority_enrichment": st.column_config.CheckboxColumn("Priority"),
-                "sector_tags_text": st.column_config.TextColumn("Sectors"),
-                "wittington_edge": st.column_config.NumberColumn("WV edge", min_value=0, max_value=20),
-                "confidence": st.column_config.TextColumn("Confidence"),
-                "primary_source_url": st.column_config.LinkColumn("Source"),
+                "company_type": st.column_config.TextColumn("Type", width="small"),
+                "confidence": st.column_config.TextColumn("Confidence", width="small"),
+                "evidence_summary": st.column_config.TextColumn("Evidence", width="large"),
+                "primary_source_url": st.column_config.LinkColumn("Source", width="small"),
             },
         )
+        st.caption("Select a cell and press Cmd/Ctrl+C to copy.")
 
-        csv = filtered[display_columns + ["total_score", "rationale", "source_urls", "evidence_summary"]].to_csv(index=False)
-        st.download_button(
-            "Download filtered CSV",
-            data=csv,
-            file_name="manifest_ranked_pipeline.csv",
-            mime="text/csv",
+    st.markdown("<div class='section-label'>Sourcing analytics</div>", unsafe_allow_html=True)
+    chart_left, chart_right = st.columns(2)
+    funnel_df = pd.DataFrame(
+        {
+            "Stage": ["Universe", "High-priority", "Enriched", "OpenAI scored"],
+            "Companies": [
+                metrics["unique_companies"],
+                metrics["high_priority_queue"],
+                metrics["enriched"],
+                metrics["openai_scored"],
+            ],
+        }
+    )
+    with chart_left:
+        st.markdown("<div class='quiet-note'>Pipeline funnel</div>", unsafe_allow_html=True)
+        _horizontal_bar_chart(
+            funnel_df,
+            "Stage",
+            "Companies",
+            height=250,
+            sort=["OpenAI scored", "Enriched", "High-priority", "Universe"],
         )
+    with chart_right:
+        st.markdown("<div class='quiet-note'>Score distribution</div>", unsafe_allow_html=True)
+        _horizontal_bar_chart(_score_band_frame(frame), "Score band", "Companies", height=250, sort="-x")
 
-    with detail_tab:
-        st.markdown("<div class='section-label'>Company detail</div>", unsafe_allow_html=True)
-        if filtered.empty:
-            st.warning("No companies match the current filters.")
-        else:
-            selected_company = st.selectbox("Company", filtered["canonical_name"].tolist())
-            selected_row = filtered[filtered["canonical_name"] == selected_company].iloc[0]
+    chart_left, chart_right = st.columns(2)
+    with chart_left:
+        st.markdown("<div class='quiet-note'>Sector mix</div>", unsafe_allow_html=True)
+        _horizontal_bar_chart(_sector_frame(frame), "Sector", "Companies", height=300, sort="-x")
+    with chart_right:
+        st.markdown("<div class='quiet-note'>Company types</div>", unsafe_allow_html=True)
+        _horizontal_bar_chart(_type_frame(frame), "Type", "Companies", height=300, sort="-x")
 
-            detail_cols = st.columns(4)
-            detail_cols[0].metric("Score", f"{int(selected_row['display_score'])}/100")
-            detail_cols[1].metric("Evidence", str(selected_row.get("evidence_status") or "Baseline only"))
-            detail_cols[2].metric("Cache", str(selected_row.get("cache_status") or "Not cached"))
-            detail_cols[3].metric("Confidence", str(selected_row.get("confidence") or "low"))
+    st.markdown("<div class='section-label'>Full ranked pipeline</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='quiet-note'>Full list retained for review. Baseline-only rows are screening signals, not verified prospects.</div>",
+        unsafe_allow_html=True,
+    )
 
-            evidence_status = str(selected_row.get("evidence_status") or "Baseline only")
-            if evidence_status == "Baseline only":
-                status_text = "Unverified baseline: this company has no cached Tavily evidence or OpenAI score yet. Treat it as a screening row, not an investment prospect."
-            elif evidence_status == "Enriched":
-                status_text = "Enriched: Tavily evidence is cached, but OpenAI scoring has not been run yet."
-            else:
-                status_text = "OpenAI scored: Tavily evidence and structured scoring are cached."
+    display_columns = [
+        "rank",
+        "canonical_name",
+        "display_score",
+        "evidence_status",
+        "cache_status",
+        "company_type",
+        "sector_tags_text",
+        "confidence",
+        "primary_source_url",
+    ]
+    st.dataframe(
+        frame[display_columns],
+        width="stretch",
+        height=640,
+        hide_index=True,
+        column_config={
+            "rank": st.column_config.NumberColumn("Rank", width="small"),
+            "canonical_name": st.column_config.TextColumn("Company", width="medium"),
+            "display_score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100),
+            "evidence_status": st.column_config.TextColumn("Evidence", width="small"),
+            "cache_status": st.column_config.TextColumn("Cache", width="small"),
+            "company_type": st.column_config.TextColumn("Type", width="small"),
+            "sector_tags_text": st.column_config.TextColumn("Sectors", width="medium"),
+            "confidence": st.column_config.TextColumn("Confidence", width="small"),
+            "primary_source_url": st.column_config.LinkColumn("Source", width="small"),
+        },
+    )
+    st.caption("Select cells to copy, or download the CSV.")
 
-            st.markdown(
-                "<div class='detail-box'>"
-                f"<div class='detail-title'>{html.escape(selected_row['canonical_name'])}</div>"
-                f"<div class='detail-text'><strong>Status:</strong> {html.escape(status_text)}</div>"
-                f"<div class='detail-text'><strong>Type:</strong> {html.escape(str(selected_row.get('company_type') or 'unknown'))}</div>"
-                f"<div class='detail-text'><strong>Rationale:</strong> {html.escape(selected_row.get('rationale') or 'No rationale yet.')}</div>"
-                f"<div class='detail-text'><strong>Evidence summary:</strong> {html.escape(selected_row.get('evidence_summary') or 'No evidence yet.')}</div>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-
-            urls = selected_row.get("top_urls") or []
-            titles = selected_row.get("top_titles") or []
-            snippets = selected_row.get("top_snippets") or []
-            with st.expander("Retrieved evidence", expanded=bool(urls)):
-                if not urls:
-                    st.caption("No external evidence cached yet.")
-                for index, url in enumerate(urls):
-                    title = titles[index] if index < len(titles) else url
-                    snippet = snippets[index] if index < len(snippets) else ""
-                    st.markdown(f"- [{title}]({url})")
-                    if snippet:
-                        st.caption(snippet)
+    csv_columns = display_columns + [
+        "high_priority_enrichment",
+        "total_score",
+        "rationale",
+        "source_urls",
+        "evidence_summary",
+    ]
+    csv = frame[csv_columns].to_csv(index=False)
+    st.download_button(
+        "Download CSV",
+        data=csv,
+        file_name="manifest_ranked_pipeline.csv",
+        mime="text/csv",
+    )
