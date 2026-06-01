@@ -296,7 +296,7 @@ CUSTOM_CSS = """
   .cost-hero-grid {
     display: grid;
     gap: 0.8rem;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .cost-hero-label {
     color: #697386;
@@ -310,6 +310,10 @@ CUSTOM_CSS = """
     line-height: 1.2;
     margin-top: 0.18rem;
     overflow-wrap: anywhere;
+  }
+  .cost-hero-value.compact {
+    font-size: 1.16rem;
+    white-space: nowrap;
   }
   .summary-card {
     background: #ffffff;
@@ -481,12 +485,69 @@ CUSTOM_CSS = """
     color: #697386;
     padding: 1rem;
   }
+  .prospect-list {
+    display: grid;
+    gap: 0.75rem;
+    margin: 0.4rem 0 1rem 0;
+  }
+  .prospect-card {
+    background: #ffffff;
+    border: 1px solid #e5e9ef;
+    border-radius: 8px;
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: minmax(12rem, 1.15fr) minmax(8rem, 0.75fr) minmax(14rem, 1.4fr);
+    padding: 0.9rem;
+  }
+  .prospect-main {
+    min-width: 0;
+  }
+  .prospect-rank {
+    color: #697386;
+    font-size: 0.78rem;
+    font-weight: 760;
+    margin-bottom: 0.24rem;
+    text-transform: uppercase;
+  }
+  .prospect-name {
+    color: #202332;
+    font-size: 1rem;
+    font-weight: 760;
+    line-height: 1.32;
+    overflow-wrap: anywhere;
+  }
+  .prospect-score {
+    min-width: 0;
+  }
+  .prospect-score-label {
+    color: #697386;
+    font-size: 0.78rem;
+    font-weight: 760;
+    margin-bottom: 0.32rem;
+    text-transform: uppercase;
+  }
+  .prospect-tags {
+    min-width: 0;
+  }
+  .prospect-evidence {
+    color: #313647;
+    font-size: 0.92rem;
+    line-height: 1.45;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
   @media (max-width: 1100px) {
     .summary-grid {
       grid-template-columns: 1fr;
     }
     .cost-hero-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .prospect-card {
+      grid-template-columns: minmax(12rem, 1fr) minmax(8rem, 0.7fr);
+    }
+    .prospect-evidence {
+      grid-column: 1 / -1;
     }
   }
   @media (max-width: 760px) {
@@ -508,16 +569,14 @@ CUSTOM_CSS = """
     .source-table td:nth-child(7) {
       display: none;
     }
-    .prospect-table th:nth-child(4),
-    .prospect-table td:nth-child(4),
-    .prospect-table th:nth-child(5),
-    .prospect-table td:nth-child(5),
-    .prospect-table th:nth-child(7),
-    .prospect-table td:nth-child(7) {
-      display: none;
-    }
     .cost-hero-grid {
       grid-template-columns: 1fr;
+    }
+    .prospect-card {
+      grid-template-columns: 1fr;
+    }
+    .prospect-evidence {
+      grid-column: auto;
     }
   }
 </style>
@@ -736,16 +795,17 @@ def _render_cost_hero(
     ]
     body = ["<div class='cost-hero'><div class='cost-hero-title'>API cost summary</div><div class='cost-hero-grid'>"]
     for label, value in items:
+        value_class = "cost-hero-value compact" if label == "Last run" else "cost-hero-value"
         body.append(
             "<div>"
             f"<div class='cost-hero-label'>{html.escape(_clean_ui_text(label))}</div>"
-            f"<div class='cost-hero-value'>{html.escape(_clean_ui_text(value))}</div>"
+            f"<div class='{value_class}'>{html.escape(_clean_ui_text(value))}</div>"
             "</div>"
         )
     body.append("</div>")
     body.append(
-        "<div class='quiet-note'>Tracked spend includes Tavily search calls plus OpenAI scoring tokens. "
-        f"Current OpenAI scoring model: {html.escape(_clean_ui_text(model_name))}</div>"
+        "<div class='quiet-note'>Spend includes Tavily search calls and OpenAI scoring tokens. "
+        f"Model: {html.escape(_clean_ui_text(model_name))}</div>"
     )
     body.append("</div>")
     st.markdown("".join(body), unsafe_allow_html=True)
@@ -943,11 +1003,11 @@ def _table_html(frame: pd.DataFrame, columns: list[tuple[str, str, str]], empty_
         return f"<div class='empty-state'>{html.escape(empty_message)}</div>"
 
     widths = {
-        "rank": "7%",
+        "rank": "6%",
         "score": "14%",
-        "company": "20%",
-        "evidence": "42%",
-        "tags": "16%",
+        "company": "22%",
+        "evidence": "38%",
+        "tags": "20%",
     }
     table_kind = "source-table" if columns and columns[0][0] == "raw_name" else "prospect-table"
     body = [f"<table class='wv-table {table_kind}'><thead><tr>"]
@@ -990,6 +1050,40 @@ def _table_html(frame: pd.DataFrame, columns: list[tuple[str, str, str]], empty_
 
 def _render_table(frame: pd.DataFrame, columns: list[tuple[str, str, str]], empty_message: str) -> None:
     st.markdown(_table_html(frame, columns, empty_message), unsafe_allow_html=True)
+
+
+def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
+    if frame.empty:
+        return f"<div class='empty-state'>{html.escape(empty_message)}</div>"
+    body = ["<div class='prospect-list'>"]
+    for _, row in frame.iterrows():
+        score = int(row.get("weighted_score") or 0)
+        rank = int(row.get("rank") or 0)
+        body.append(
+            "<div class='prospect-card'>"
+            "<div class='prospect-main'>"
+            f"<div class='prospect-rank'>Rank {rank}</div>"
+            f"<div class='prospect-name'>{html.escape(_clean_ui_text(row.get('canonical_name')))}</div>"
+            "</div>"
+            "<div class='prospect-score'>"
+            "<div class='prospect-score-label'>Fit score</div>"
+            "<div class='score-cell'>"
+            "<div class='score-track'>"
+            f"<span class='score-fill' style='width:{max(0, min(100, score))}%'></span>"
+            "</div>"
+            f"<span class='score-number'>{score}</span>"
+            "</div>"
+            f"<div class='prospect-tags'>{_tag_pills(row.get('sector_tags'))}</div>"
+            "</div>"
+            f"<div class='prospect-evidence'>{html.escape(_clean_ui_text(row.get('evidence_summary') or 'No external evidence yet.'))}</div>"
+            "</div>"
+        )
+    body.append("</div>")
+    return "".join(body)
+
+
+def _render_prospect_cards(frame: pd.DataFrame, empty_message: str) -> None:
+    st.markdown(_prospect_cards_html(frame, empty_message), unsafe_allow_html=True)
 
 
 def _render_workflow(metrics: dict) -> None:
@@ -1221,15 +1315,8 @@ if run_step == "verify":
         latest_weighted = _apply_weighted_scores(latest_frame, weights)
         latest_prospects = latest_weighted[latest_weighted["is_refined_prospect"]].head(8)
         preview.markdown(
-            _table_html(
+            _prospect_cards_html(
                 latest_prospects,
-                [
-                    ("rank", "Rank", "rank"),
-                    ("canonical_name", "Company", "company"),
-                    ("weighted_score", "Fit score", "score"),
-                    ("company_type_display", "Type", "text"),
-                    ("confidence_display", "Confidence", "text"),
-                ],
                 "Verified prospects will appear here as scoring completes.",
             ),
             unsafe_allow_html=True,
@@ -1251,8 +1338,14 @@ if run_step == "verify":
     )
     progress.progress(1.0, text="Verification run finished.")
     level = "warning" if enrich_result.counts.get("errors") or score_result.counts.get("errors") else "success"
+    total_spend = float(enrich_result.counts.get("estimated_cost_usd") or 0) + float(
+        score_result.counts.get("estimated_cost_usd") or 0
+    )
     st.session_state["last_action"] = {
-        "message": f"{classify_result.message} {enrich_result.message} {score_result.message}",
+        "message": (
+            f"Verified {score_result.counts.get('scored', 0):,} companies from a {cap:,}-company batch. "
+            f"Estimated run spend: {_format_currency(total_spend)}."
+        ),
         "level": level,
     }
     frame, metrics = _load_frame_and_metrics(conn)
@@ -1383,17 +1476,8 @@ else:
         st.divider()
 
         st.markdown("<div class='section-label'>Top verified prospects</div>", unsafe_allow_html=True)
-        _render_table(
+        _render_prospect_cards(
             prospects.head(10),
-            [
-                ("rank", "Rank", "rank"),
-                ("canonical_name", "Company", "company"),
-                ("weighted_score", "Fit score", "score"),
-                ("company_type_display", "Type", "text"),
-                ("confidence_display", "Confidence", "text"),
-                ("sector_tags", "Sectors", "tags"),
-                ("evidence_summary", "Evidence", "evidence"),
-            ],
             "No externally verified prospects yet. Generate a capped batch to populate this list.",
         )
 
@@ -1452,17 +1536,8 @@ else:
             f"<div class='quiet-note'>Showing {_format_int(len(visible_prospects))} refined prospects that have external evidence and API scoring.</div>",
             unsafe_allow_html=True,
         )
-        _render_table(
+        _render_prospect_cards(
             visible_prospects,
-            [
-                ("rank", "Rank", "rank"),
-                ("canonical_name", "Company", "company"),
-                ("weighted_score", "Fit score", "score"),
-                ("company_type_display", "Type", "text"),
-                ("confidence_display", "Confidence", "text"),
-                ("sector_tags", "Sectors", "tags"),
-                ("evidence_summary", "Evidence", "evidence"),
-            ],
             "No verified prospects match the current filters.",
         )
         prospect_export = prospects[

@@ -12,7 +12,7 @@ Hosted app: https://wv-manifest-prospecting-tool-b8jadagmhgsh8wirbknjb9.streamli
 - Source list view for the messy attendee data after cleaning, dedupe, and rule screening.
 - Verified prospects view for companies that passed evidence enrichment and API scoring.
 - Larger full-width charts with horizontal labels for readability.
-- Wider prospect evidence columns so company descriptions can be read without cramped table cells.
+- Responsive prospect cards so company descriptions and sector tags stay readable across desktop, tablet, and mobile.
 - Prominent API cost summary that combines OpenAI token spend and Tavily search-call spend.
 - Model selector and batch cap for controlling how many companies get verified in each run.
 - Scoring weight controls for investor preference changes.
