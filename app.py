@@ -1525,7 +1525,7 @@ if workflow_stage >= 2:
     prospect_cap = settings_cols[0].number_input(
         "Companies to verify now",
         min_value=1,
-        max_value=500,
+        max_value=5000,
         value=int(st.session_state.get("prospect_cap", min(settings.max_score, 100))),
         step=5,
         key="prospect_cap",
@@ -1544,7 +1544,9 @@ if workflow_stage >= 2:
         f"**Internal token-rate estimate**  \n"
         f"Input: `${model_pricing['input']:g}` / 1M tokens  \n"
         f"Output: `${model_pricing['output']:g}` / 1M tokens  \n"
-        f"Tavily: `{_setting(settings, 'tavily_plan_name', 'Researcher')}` plan credits"
+        f"Tavily: `{_setting(settings, 'tavily_plan_name', 'Researcher')}` plan credits  \n"
+        f"Parallel workers: `{_setting_int(settings, 'tavily_concurrency', 12)}` search, "
+        f"`{_setting_int(settings, 'openai_concurrency', 6)}` scoring"
     )
 
 if workflow_stage == 1:
@@ -1591,6 +1593,8 @@ if run_step == "verify":
                 min(1.0, 0.5 + (index / total) * 0.5),
                 text=f"Prospect scoring {index:,}/{total:,}: {result.get('company_name', '')}",
             )
+        if total and index < total and index % 5 != 0:
+            return
         latest_frame, _latest_metrics = _load_frame_and_metrics(conn)
         latest_weighted = _apply_weighted_scores(latest_frame, weights)
         latest_prospects = latest_weighted[latest_weighted["is_refined_prospect"]].head(8)

@@ -227,7 +227,7 @@ def update_deterministic_result(
     )
 
 
-def save_enrichment(conn: sqlite3.Connection, enrichment: dict[str, Any]) -> None:
+def save_enrichment(conn: sqlite3.Connection, enrichment: dict[str, Any], *, commit: bool = True) -> None:
     conn.execute(
         """
         INSERT INTO enrichments (
@@ -260,10 +260,18 @@ def save_enrichment(conn: sqlite3.Connection, enrichment: dict[str, Any]) -> Non
             enrichment.get("error"),
         ),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
-def save_score(conn: sqlite3.Connection, company_id: int, score: dict[str, Any], provider: str) -> None:
+def save_score(
+    conn: sqlite3.Connection,
+    company_id: int,
+    score: dict[str, Any],
+    provider: str,
+    *,
+    commit: bool = True,
+) -> None:
     conn.execute(
         """
         INSERT INTO scores (
@@ -311,7 +319,8 @@ def save_score(conn: sqlite3.Connection, company_id: int, score: dict[str, Any],
             json.dumps(score.get("raw_json")),
         ),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def get_successful_enrichment(conn: sqlite3.Connection, company_id: int, provider: str = "tavily") -> dict[str, Any] | None:
@@ -337,11 +346,13 @@ def save_baseline_score_if_missing_or_baseline(
     conn: sqlite3.Connection,
     company_id: int,
     score: dict[str, Any],
+    *,
+    commit: bool = True,
 ) -> bool:
     existing = get_score(conn, company_id)
     if existing and existing.get("provider") == "openai":
         return False
-    save_score(conn, company_id, score, provider="baseline")
+    save_score(conn, company_id, score, provider="baseline", commit=commit)
     return True
 
 

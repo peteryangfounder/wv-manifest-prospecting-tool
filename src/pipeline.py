@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -32,6 +33,24 @@ def _setting(settings: Settings, name: str, default):
     return getattr(settings, name, default)
 
 
+def _setting_int(settings: Settings, name: str, default: int) -> int:
+    try:
+        return int(_setting(settings, name, default) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _bounded_worker_count(settings: Settings, name: str, default: int, item_count: int) -> int:
+    if item_count <= 0:
+        return 1
+    configured = _setting_int(settings, name, default)
+    return max(1, min(configured, item_count))
+
+
+def _commit_interval(settings: Settings) -> int:
+    return max(1, _setting_int(settings, "db_commit_batch_size", 25))
+
+
 def load_attendees(conn, settings: Settings) -> PipelineResult:
     run_id = db.start_run(conn, "load_attendees")
     raw_names, metadata = get_attendee_names(settings.manifest_url)
@@ -57,7 +76,7 @@ def run_deterministic_classification(conn) -> PipelineResult:
     candidates = 0
     high_priority = 0
 
-    for company in companies:
+    for index, company in enumerate(companies, start=1):
         result = classify_company_name(company["canonical_name"])
         db.update_deterministic_result(
             conn,
@@ -74,10 +93,18 @@ def run_deterministic_classification(conn) -> PipelineResult:
             "deterministic_exclusion_reason": result.exclusion_reason,
             "deterministic_tags": json.dumps(result.tags),
         }
-        db.save_baseline_score_if_missing_or_baseline(conn, company["id"], baseline_score(enriched_company))
+        db.save_baseline_score_if_missing_or_baseline(
+            conn,
+            company["id"],
+            baseline_score(enriched_company),
+            commit=False,
+        )
         candidates += 1 if result.is_candidate else 0
         high_priority += 1 if result.high_priority_enrichment else 0
+        if index % 250 == 0:
+            conn.commit()
 
+    conn.commit()
     db.finish_run(
         conn,
         run_id,
@@ -110,26 +137,35 @@ def enrich_candidates(
             {"tavily_calls": 0, "enriched": 0, "cache_hits": 0},
         )
 
-    client = TavilyClient(settings.tavily_api_key, settings.tavily_max_results)
     companies = db.candidates_for_enrichment(conn, limit=limit, force=force, high_priority_only=True)
     calls = 0
     enriched = 0
     errors = 0
     cache_hits = 0
+    workers = _bounded_worker_count(settings, "tavily_concurrency", 12, len(companies))
+    commit_interval = _commit_interval(settings)
 
-    for index, company in enumerate(companies, start=1):
-        result = _enrich_one_company(conn, settings, company, force=force, client=client)
-        calls += result["api_call"]
-        enriched += result["enriched"]
-        errors += result["error_count"]
-        cache_hits += result["cache_hit"]
-        if progress_callback:
-            progress_callback(
-                index,
-                len(companies),
-                result,
-                {"tavily_calls": calls, "enriched": enriched, "errors": errors, "cache_hits": cache_hits},
-            )
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(_fetch_enrichment_for_company, settings, company) for company in companies]
+        for index, future in enumerate(as_completed(futures), start=1):
+            result = future.result()
+            enrichment = result.pop("enrichment", None)
+            if enrichment is not None:
+                db.save_enrichment(conn, enrichment, commit=False)
+            calls += result["api_call"]
+            enriched += result["enriched"]
+            errors += result["error_count"]
+            cache_hits += result["cache_hit"]
+            if index % commit_interval == 0:
+                conn.commit()
+            if progress_callback:
+                progress_callback(
+                    index,
+                    len(companies),
+                    result,
+                    {"tavily_calls": calls, "enriched": enriched, "errors": errors, "cache_hits": cache_hits},
+                )
+    conn.commit()
 
     tavily_billing = calculate_tavily_billing(
         credits_used=calls,
@@ -151,7 +187,7 @@ def enrich_candidates(
     return PipelineResult(
         "tavily_enrichment",
         (
-            f"Made {calls:,} Tavily calls and stored {enriched:,} successful enrichments. "
+            f"Made {calls:,} Tavily calls with {workers:,} parallel workers and stored {enriched:,} successful enrichments. "
             f"Tavily billed spend: ${tavily_billing.actual_billed_usd:.4f}; "
             f"free credits remaining: {tavily_billing.free_credits_remaining:,}."
         ),
@@ -163,6 +199,7 @@ def enrich_candidates(
             "enriched": enriched,
             "errors": errors,
             "cache_hits": cache_hits,
+            "parallel_workers": workers,
             "estimated_cost_usd": 0.0,
         },
     )
@@ -194,33 +231,45 @@ def score_enriched_candidates(
     completion_tokens = 0
     total_tokens = 0
     estimated_cost_usd = 0.0
+    workers = _bounded_worker_count(settings, "openai_concurrency", 6, len(companies))
+    commit_interval = _commit_interval(settings)
 
-    for index, company in enumerate(companies, start=1):
-        result = _score_one_company(conn, settings, company, force=force)
-        calls += result["api_call"]
-        scored += result["scored"]
-        errors += result["error_count"]
-        cache_hits += result["cache_hit"]
-        prompt_tokens += result.get("prompt_tokens", 0)
-        completion_tokens += result.get("completion_tokens", 0)
-        total_tokens += result.get("total_tokens", 0)
-        estimated_cost_usd += result.get("estimated_cost_usd", 0.0)
-        if progress_callback:
-            progress_callback(
-                index,
-                len(companies),
-                result,
-                {
-                    "openai_calls": calls,
-                    "scored": scored,
-                    "errors": errors,
-                    "cache_hits": cache_hits,
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": total_tokens,
-                    "estimated_cost_usd": estimated_cost_usd,
-                },
-            )
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(_score_company_with_openai, settings, company) for company in companies]
+        for index, future in enumerate(as_completed(futures), start=1):
+            result = future.result()
+            score = result.pop("score", None)
+            provider = result.pop("provider", "openai")
+            company_id = result.pop("company_id", None)
+            if score is not None and company_id is not None:
+                db.save_score(conn, company_id, score, provider=provider, commit=False)
+            calls += result["api_call"]
+            scored += result["scored"]
+            errors += result["error_count"]
+            cache_hits += result["cache_hit"]
+            prompt_tokens += result.get("prompt_tokens", 0)
+            completion_tokens += result.get("completion_tokens", 0)
+            total_tokens += result.get("total_tokens", 0)
+            estimated_cost_usd += result.get("estimated_cost_usd", 0.0)
+            if index % commit_interval == 0:
+                conn.commit()
+            if progress_callback:
+                progress_callback(
+                    index,
+                    len(companies),
+                    result,
+                    {
+                        "openai_calls": calls,
+                        "scored": scored,
+                        "errors": errors,
+                        "cache_hits": cache_hits,
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                        "estimated_cost_usd": estimated_cost_usd,
+                    },
+                )
+    conn.commit()
 
     db.finish_run(
         conn,
@@ -236,7 +285,7 @@ def score_enriched_candidates(
     )
     return PipelineResult(
         "openai_scoring",
-        f"Made {calls:,} OpenAI calls and stored {scored:,} structured scores. Tokens: {total_tokens:,}. Estimated model spend: ${estimated_cost_usd:.4f}.",
+        f"Made {calls:,} OpenAI calls with {workers:,} parallel workers and stored {scored:,} structured scores. Tokens: {total_tokens:,}. Estimated model spend: ${estimated_cost_usd:.4f}.",
         {
             "openai_calls": calls,
             "scored": scored,
@@ -245,9 +294,93 @@ def score_enriched_candidates(
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
+            "parallel_workers": workers,
             "estimated_cost_usd": estimated_cost_usd,
         },
     )
+
+
+def _fetch_enrichment_for_company(settings: Settings, company: dict[str, Any]) -> dict[str, Any]:
+    try:
+        client = TavilyClient(settings.tavily_api_key, settings.tavily_max_results)
+        payload = client.search(company["canonical_name"])
+        enrichment = compact_tavily_response(company["id"], payload)
+        return {
+            "api_call": 1,
+            "cache_hit": 0,
+            "enriched": 1 if enrichment["status"] == "success" else 0,
+            "error_count": 0 if enrichment["status"] == "success" else 1,
+            "status": enrichment["status"],
+            "company_name": company["canonical_name"],
+            "enrichment": enrichment,
+        }
+    except EnrichmentUnavailable:
+        raise
+    except Exception as exc:  # noqa: BLE001 - persist provider failure per company.
+        return {
+            "api_call": 1,
+            "cache_hit": 0,
+            "enriched": 0,
+            "error_count": 1,
+            "status": "error",
+            "company_name": company["canonical_name"],
+            "enrichment": {
+                "company_id": company["id"],
+                "query": f'"{company["canonical_name"]}" company startup logistics supply chain commerce healthcare climate funding',
+                "provider": "tavily",
+                "raw_json": {},
+                "top_titles": [],
+                "top_urls": [],
+                "top_snippets": [],
+                "website": None,
+                "status": "error",
+                "error": str(exc),
+            },
+        }
+
+
+def _score_company_with_openai(settings: Settings, company: dict[str, Any]) -> dict[str, Any]:
+    try:
+        score = classify_with_openai(company, settings.openai_api_key or "", settings.openai_model)
+        usage = (score.get("raw_json") or {}).get("usage") or {}
+        prompt_tokens = int(usage.get("prompt_tokens") or 0)
+        completion_tokens = int(usage.get("completion_tokens") or 0)
+        total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
+        estimated_cost_usd = _estimate_openai_cost(settings, prompt_tokens, completion_tokens)
+        score["raw_json"]["estimated_cost_usd"] = estimated_cost_usd
+        return {
+            "api_call": 1,
+            "cache_hit": 0,
+            "scored": 1,
+            "error_count": 0,
+            "status": "success",
+            "company_name": company["canonical_name"],
+            "company_id": company["id"],
+            "provider": "openai",
+            "score": score,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "estimated_cost_usd": estimated_cost_usd,
+        }
+    except Exception as exc:  # noqa: BLE001 - keep partial scoring runs usable.
+        fallback = baseline_score(company)
+        fallback["rationale"] = f"OpenAI scoring failed. Baseline retained. Error: {str(exc)[:120]}"
+        return {
+            "api_call": 1,
+            "cache_hit": 0,
+            "scored": 0,
+            "error_count": 1,
+            "status": "error",
+            "company_name": company["canonical_name"],
+            "company_id": company["id"],
+            "provider": "baseline",
+            "score": fallback,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "estimated_cost_usd": 0.0,
+        }
 
 
 def _enrich_one_company(

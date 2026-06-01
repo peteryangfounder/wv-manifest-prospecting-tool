@@ -76,6 +76,9 @@ class Settings:
     openai_input_cost_per_1m_tokens: float
     openai_output_cost_per_1m_tokens: float
     tavily_cost_per_call_usd: float
+    tavily_concurrency: int = 12
+    openai_concurrency: int = 6
+    db_commit_batch_size: int = 25
     tavily_plan_name: str = "Researcher"
     tavily_included_monthly_credits: int = 1000
     tavily_pay_as_you_go_enabled: bool = False
@@ -97,6 +100,9 @@ def get_settings() -> Settings:
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         max_enrich=_env_int("MAX_ENRICH", 75),
         max_score=_env_int("MAX_SCORE", 75),
+        tavily_concurrency=_env_int("TAVILY_CONCURRENCY", 12),
+        openai_concurrency=_env_int("OPENAI_CONCURRENCY", 6),
+        db_commit_batch_size=_env_int("DB_COMMIT_BATCH_SIZE", 25),
         tavily_max_results=_env_int("TAVILY_MAX_RESULTS", 3),
         openai_input_cost_per_1m_tokens=_env_float("OPENAI_INPUT_COST_PER_1M_TOKENS", 0.15),
         openai_output_cost_per_1m_tokens=_env_float("OPENAI_OUTPUT_COST_PER_1M_TOKENS", 0.60),

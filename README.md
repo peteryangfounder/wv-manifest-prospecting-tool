@@ -48,6 +48,9 @@ TAVILY_API_KEY=your_tavily_key_here
 OPENAI_MODEL=gpt-4o-mini
 MAX_ENRICH=75
 MAX_SCORE=75
+TAVILY_CONCURRENCY=12
+OPENAI_CONCURRENCY=6
+DB_COMMIT_BATCH_SIZE=25
 TAVILY_MAX_RESULTS=3
 DATABASE_PATH=data/prospects.db
 OPENAI_INPUT_COST_PER_1M_TOKENS=0.15
@@ -105,6 +108,8 @@ python scripts/run_pipeline.py --score --max-score 25
 `src/classify.py` sends compact evidence to OpenAI. The model returns structured JSON with company type, startup signal, sector tags, Wittington edge, score components, confidence, rationale, and evidence summary.
 
 `src/db.py` stores companies, enrichments, scores, and run metadata. The dashboard uses that run metadata for API-call counts, tokens, cache hits, and estimated spend.
+
+The enrichment and scoring stages run provider requests concurrently while keeping SQLite writes on the main thread. `TAVILY_CONCURRENCY` and `OPENAI_CONCURRENCY` control the number of simultaneous provider requests. They improve throughput but do not change the number of provider calls; the dashboard batch size and cache reuse remain the primary cost controls. `DB_COMMIT_BATCH_SIZE` controls how often completed results are committed during a run.
 
 ## Billing And Usage Tracking
 
