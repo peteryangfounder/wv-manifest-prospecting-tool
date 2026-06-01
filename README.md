@@ -122,11 +122,11 @@ The dashboard separates provider-billed spend from internal estimates:
 - Live OpenAI completions usage from `GET /v1/organization/usage/completions` when `OPENAI_ADMIN_KEY` is configured
 - Wittington project lifetime-to-date billing from `OPENAI_BILLING_START_DATE` through the current time
 - Recent billing from `OPENAI_BILLING_LOOKBACK_DAYS`
-- Local OpenAI token estimate based on configured token prices
-- Tavily shadow value for planning only, not reimbursement
+- Internal token-rate estimate based on configured token prices
+- Tavily shadow value for planning only
 - Streamlit Community Cloud hosting shown as `$0.00`
 
-Provider-billed OpenAI cost for the configured `OPENAI_BILLING_PROJECT_ID` is the source of truth for reimbursement when available. The primary dashboard total uses `OPENAI_BILLING_START_DATE` through the current time for the Wittington project lifetime-to-date window. If project-scoped billing is unavailable and the OpenAI API returns organization-level fallback data, the app labels it as org-wide context and does not use it as the project reimbursement total. If live OpenAI billing is unavailable because `OPENAI_ADMIN_KEY` is missing or the API request fails, the app continues running and clearly labels the local token-based fallback as an estimate rather than an invoice. SQLite stores every run so reruns can show cumulative calls, tokens, cache hits, and local estimates.
+Provider-billed OpenAI cost for the configured `OPENAI_BILLING_PROJECT_ID` is the source of truth for live billing when available. The primary dashboard total uses `OPENAI_BILLING_START_DATE` through the current time for the Wittington project lifetime-to-date window. If project-scoped billing is unavailable and the OpenAI API returns organization-level fallback data, the app labels it as org-wide context and keeps it separate from the project billed-cost total. If live OpenAI billing is unavailable because `OPENAI_ADMIN_KEY` is missing or the API request fails, the app continues running and clearly labels the internal token-rate fallback as an estimate rather than platform billing data. SQLite stores every run so reruns can show cumulative calls, tokens, cache hits, and local estimates.
 
 `TAVILY_COST_PER_CALL_USD` remains supported as an internal shadow estimate for projections. It is not included in actual provider-billed spend unless Tavily pay-as-you-go is explicitly enabled, in which case overage credits beyond `TAVILY_INCLUDED_MONTHLY_CREDITS` are billed using `TAVILY_PAYG_PRICE_PER_CREDIT_USD`.
 

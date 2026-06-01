@@ -743,7 +743,7 @@ def _format_openai_billed(snapshot: OpenAIBillingSnapshot) -> str:
 def _cache_status(snapshot: OpenAIBillingSnapshot) -> str:
     if not snapshot.available:
         return "unavailable"
-    return "cache" if snapshot.from_cache else "fresh API fetch"
+    return "cached" if snapshot.from_cache else "fresh"
 
 
 def _billing_status(snapshot: OpenAIBillingSnapshot) -> str:
@@ -932,8 +932,8 @@ def _render_cost_hero(
 ) -> None:
     cost_items = [
         ("All-time billed cost", _format_billed_total(provider_spend)),
-        (f"Billed cost, {recent_openai_billing.window_label}", _format_openai_billed(recent_openai_billing)),
-        ("Local OpenAI estimate", _format_currency(local_openai_estimate)),
+        (f"OpenAI billed cost, {recent_openai_billing.window_label}", _format_openai_billed(recent_openai_billing)),
+        ("Internal token-rate estimate", _format_currency(local_openai_estimate)),
     ]
     usage_items = [
         ("OpenAI tokens used", _format_int(total_tokens)),
@@ -943,17 +943,16 @@ def _render_cost_hero(
         ),
         ("OpenAI scoring calls", _format_int(openai_calls)),
         ("Last run API calls", _format_int(last_api_calls)),
-        ("Last run local estimate", _format_currency(last_run_local_openai_estimate)),
+        ("Last run token-rate estimate", _format_currency(last_run_local_openai_estimate)),
     ]
     detail_items = [
-        ("Source", lifetime_openai_billing.source_label),
-        ("Project", lifetime_openai_billing.project_id or "None"),
+        ("Live billing source", lifetime_openai_billing.source_label),
+        ("OpenAI project", lifetime_openai_billing.project_id or "None"),
         ("Billing start", lifetime_openai_billing.window_start_label or "Unavailable"),
         ("Last fetched", lifetime_openai_billing.fetched_at_label or "Unavailable"),
         ("Data status", _cache_status(lifetime_openai_billing)),
-        ("Scope", lifetime_openai_billing.scope_label),
         ("Tavily plan", f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"),
-        ("Hosting", _format_currency(provider_spend.hosting_billed_usd)),
+        ("Streamlit Cloud hosting", _format_currency(provider_spend.hosting_billed_usd)),
     ]
 
     body = ["<div class='cost-hero'><div class='cost-hero-title'>API usage and cost</div><div class='cost-hero-grid'>"]
@@ -983,16 +982,16 @@ def _render_cost_hero(
         and local_openai_estimate > 0
     ):
         body.append(
-            "<div class='billing-note'>Provider-billed cost is the reimbursement total. "
-            f"The local estimate uses configured token rates for {html.escape(_clean_ui_text(model_name))} and is for planning only.</div>"
+            "<div class='billing-note'>Billed cost comes from live OpenAI billing data. "
+            f"The internal estimate uses configured token rates for {html.escape(_clean_ui_text(model_name))} and may differ from platform billing.</div>"
         )
     if not lifetime_openai_billing.available:
         body.append(
-            "<div class='billing-note'>Live OpenAI billing unavailable. The local estimate is shown for planning only.</div>"
+            "<div class='billing-note'>Live OpenAI billing unavailable. Showing the internal token-rate estimate instead.</div>"
         )
     elif not lifetime_openai_billing.is_project_scoped:
         body.append(
-            "<div class='billing-note'>OpenAI returned organization-level billing. It is not used in the Wittington project reimbursement total.</div>"
+            "<div class='billing-note'>OpenAI returned organization-level billing. The all-time billed cost above excludes org-level OpenAI spend.</div>"
         )
     body.append("</div>")
     st.markdown("".join(body), unsafe_allow_html=True)
@@ -1542,7 +1541,7 @@ if workflow_stage >= 2:
     model_pricing = _selected_model_pricing(selected_model)
     runtime_settings = _settings_for_run(settings, selected_model, model_pricing["input"], model_pricing["output"])
     settings_cols[2].markdown(
-        f"**Local OpenAI estimate**  \n"
+        f"**Internal token-rate estimate**  \n"
         f"Input: `${model_pricing['input']:g}` / 1M tokens  \n"
         f"Output: `${model_pricing['output']:g}` / 1M tokens  \n"
         f"Tavily: `{_setting(settings, 'tavily_plan_name', 'Researcher')}` plan credits"
@@ -1718,7 +1717,7 @@ with summary_cols[1]:
             ("Billing start", str(lifetime_openai_billing.window_start_label or "Unavailable")),
             ("Tavily billing", f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"),
             ("Tavily credits remaining", _format_int(tavily_billing.free_credits_remaining)),
-            ("Hosting cost", _format_currency(provider_spend.hosting_billed_usd)),
+            ("Streamlit Cloud hosting", _format_currency(provider_spend.hosting_billed_usd)),
         ],
     )
 
@@ -1771,7 +1770,7 @@ else:
 
         st.markdown("<div class='section-label'>Internal estimates and shadow values</div>", unsafe_allow_html=True)
         st.markdown(
-            "<div class='quiet-note'>These values support planning and projections. They are not provider-billed reimbursement totals.</div>",
+            "<div class='quiet-note'>These values support planning and projections. They are separate from provider-billed costs.</div>",
             unsafe_allow_html=True,
         )
         st.altair_chart(
@@ -1781,7 +1780,7 @@ else:
         st.divider()
 
         cost_stage_df = _stage_cost_frame(metrics, settings)
-        st.markdown("<div class='section-label'>Local OpenAI estimate by stage</div>", unsafe_allow_html=True)
+        st.markdown("<div class='section-label'>Internal token-rate estimate by stage</div>", unsafe_allow_html=True)
         st.altair_chart(
             _horizontal_bar_chart(cost_stage_df, "Stage", "Estimated USD", height=220, sort=None),
             use_container_width=True,
