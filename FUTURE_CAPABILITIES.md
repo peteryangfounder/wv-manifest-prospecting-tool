@@ -1,6 +1,6 @@
 # Future Capabilities
 
-The next product layer should make this feel like a daily investor workflow rather than a scoring table. I would add saved shortlists, CRM statuses, owner assignment, partner comments, duplicate merge review, and saved views by vertical such as commerce infrastructure, supply-chain automation, climate logistics, and healthcare operations. Each company should have a drilldown page with source evidence, score history, why the rank changed, and a one-click memo generator for partner meetings.
+The next product layer should make this feel like a daily investor workflow rather than a static review screen. I would add saved shortlists, CRM statuses, owner assignment, partner comments, duplicate merge review, and saved views by vertical such as commerce infrastructure, supply-chain automation, climate logistics, and healthcare operations. Each company should have a drilldown page with source evidence, score history, why the rank changed, and a one-click memo generator for partner meetings.
 
 The most useful workflow additions would be bulk actions. Investors should be able to export to CRM, mark a company as not relevant, request deeper diligence, and create a partner intro hypothesis tied to Wittington's corporate relationships. The current app already has CSV export, company detail, and adjustable scoring weights. The next version should turn those into collaborative review tools.
 

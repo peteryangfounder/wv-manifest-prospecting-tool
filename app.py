@@ -63,7 +63,7 @@ DISPLAY_LABELS = {
     "incumbent_or_public_company": "Incumbent or public company",
     "investor": "Investor",
     "investor_or_financial_firm": "Investor or financial firm",
-    "likely_startup_or_tech": "Tech candidate",
+    "likely_startup_or_tech": "Technology company",
     "load_attendees": "Source load",
     "logistics": "Logistics",
     "logistics_service_provider": "Logistics service provider",
@@ -1271,13 +1271,13 @@ with st.sidebar:
     st.caption(f"SQLite: `{display_database_path}`")
 
     source_rows_shown = st.number_input(
-        "Rows in source table",
+        "Source cards shown",
         min_value=10,
         max_value=500,
         value=int(st.session_state.get("source_rows_shown", 75)),
         step=10,
         key="source_rows_shown",
-        help="How many rows to show in the Source list tab. This does not change API calls.",
+        help="How many source cards to show in the Source list tab. This does not change API calls.",
     )
 
     with st.expander("Review scoring weights", expanded=False):
@@ -1623,7 +1623,7 @@ else:
                 "raw_name": "Raw attendee entry",
                 "canonical_name": "Cleaned company",
                 "source_status": "Status",
-                "deterministic_type_display": "Rule bucket",
+                "deterministic_type_display": "Rule screen",
                 "sector_tags_text": "Sectors",
                 "weighted_score": "Screen score",
                 "duplicate_count": "Rows",
