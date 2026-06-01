@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 from collections import Counter
+from dataclasses import replace
 from urllib.parse import quote_plus
 
 import altair as alt
@@ -111,12 +112,21 @@ GENERIC_PLACEHOLDERS = {
     "tbd",
 }
 
+OPENAI_MODEL_PRESETS = {
+    "gpt-5.5": {"input": 1.25, "output": 10.00},
+    "gpt-5.4": {"input": 1.25, "output": 10.00},
+    "gpt-4.1": {"input": 2.00, "output": 8.00},
+    "gpt-4.1-mini": {"input": 0.40, "output": 1.60},
+    "gpt-4o": {"input": 2.50, "output": 10.00},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+}
+
 
 CUSTOM_CSS = """
 <style>
   .block-container {
     max-width: 1240px;
-    padding-top: 2rem;
+    padding-top: 1rem;
     padding-bottom: 2.5rem;
   }
   h1, h2, h3 {
@@ -124,23 +134,27 @@ CUSTOM_CSS = """
   }
   .wv-header {
     border-bottom: 1px solid #eceff3;
-    margin-bottom: 1rem;
-    padding-bottom: 1rem;
+    margin-bottom: 0.9rem;
+    padding: 0.35rem 0 1rem 0;
   }
   .wv-eyebrow {
     color: #5d6675;
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     font-weight: 700;
-    letter-spacing: 0.08em;
-    margin: 0 0 0.25rem 0;
+    letter-spacing: 0.04em;
+    line-height: 1.35;
+    margin: 0 0 0.45rem 0;
     text-transform: uppercase;
+    white-space: normal;
   }
   .wv-title {
     color: #202332;
-    font-size: clamp(2.1rem, 5vw, 3.25rem);
+    font-size: clamp(2rem, 4.4vw, 3.05rem);
     font-weight: 780;
-    line-height: 1.02;
+    line-height: 1.08;
     margin: 0;
+    overflow-wrap: normal;
+    white-space: normal;
   }
   .wv-subtitle {
     color: #697386;
@@ -148,37 +162,140 @@ CUSTOM_CSS = """
     margin: 0.6rem 0 0 0;
     max-width: 800px;
   }
-  .metric-grid {
+  .guided-panel {
+    background: #ffffff;
+    border: 1px solid #dfe5ee;
+    border-radius: 10px;
+    margin: 1rem 0 1.15rem 0;
+    padding: 1rem;
+  }
+  .guided-kicker {
+    color: #697386;
+    font-size: 0.78rem;
+    font-weight: 760;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .guided-title {
+    color: #202332;
+    font-size: 1.35rem;
+    font-weight: 780;
+    margin-top: 0.15rem;
+  }
+  .guided-copy {
+    color: #5d6675;
+    font-size: 0.96rem;
+    line-height: 1.45;
+    margin: 0.35rem 0 0.85rem 0;
+    max-width: 760px;
+  }
+  .step-list {
+    display: grid;
+    gap: 0.55rem;
+    grid-template-columns: 1fr;
+    margin: 0.8rem 0 1rem 0;
+  }
+  .step-row {
+    align-items: flex-start;
+    background: #f8fafc;
+    border: 1px solid #e5e9ef;
+    border-radius: 8px;
     display: grid;
     gap: 0.75rem;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: 2rem 1fr auto;
+    padding: 0.72rem 0.8rem;
+  }
+  .step-row.active {
+    background: #fff4f4;
+    border-color: #ff4b4b;
+  }
+  .step-row.complete {
+    background: #f1fbf5;
+    border-color: #44a463;
+  }
+  .step-number {
+    align-items: center;
+    background: #202332;
+    border-radius: 999px;
+    color: #ffffff;
+    display: flex;
+    font-size: 0.85rem;
+    font-weight: 780;
+    height: 1.7rem;
+    justify-content: center;
+    line-height: 1;
+    width: 1.7rem;
+  }
+  .step-row.complete .step-number {
+    background: #16823d;
+  }
+  .step-row.active .step-number {
+    background: #ff4b4b;
+  }
+  .step-label {
+    color: #202332;
+    font-size: 0.98rem;
+    font-weight: 760;
+  }
+  .step-detail {
+    color: #8b94a5;
+    font-size: 0.82rem;
+    line-height: 1.35;
+    margin-top: 0.12rem;
+  }
+  .step-state {
+    color: #697386;
+    font-size: 0.78rem;
+    font-weight: 720;
+    white-space: nowrap;
+  }
+  .primary-cta button {
+    background: #202332 !important;
+    border-color: #202332 !important;
+    color: #ffffff !important;
+    font-weight: 760 !important;
+  }
+  .run-settings {
+    background: #f8fafc;
+    border: 1px solid #e6eaf1;
+    border-radius: 8px;
+    margin-top: 0.8rem;
+    padding: 0.85rem;
+  }
+  .summary-grid {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     margin: 1rem 0 1.2rem 0;
   }
-  .metric-card {
+  .summary-card {
     background: #ffffff;
     border: 1px solid #e5e9ef;
     border-radius: 8px;
-    padding: 0.85rem 0.9rem;
+    padding: 0.95rem;
   }
-  .metric-label {
-    color: #697386;
-    font-size: 0.76rem;
-    font-weight: 650;
-    line-height: 1.2;
-    margin-bottom: 0.35rem;
-    text-transform: uppercase;
-  }
-  .metric-value {
+  .summary-title {
     color: #202332;
-    font-size: 1.45rem;
+    font-size: 0.92rem;
     font-weight: 760;
-    line-height: 1.1;
+    margin-bottom: 0.5rem;
   }
-  .metric-caption {
-    color: #8b94a5;
-    font-size: 0.78rem;
-    line-height: 1.25;
-    margin-top: 0.3rem;
+  .summary-line {
+    align-items: baseline;
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.24rem 0;
+  }
+  .summary-label {
+    color: #697386;
+    font-size: 0.86rem;
+  }
+  .summary-value {
+    color: #202332;
+    font-size: 0.96rem;
+    font-weight: 760;
+    text-align: right;
   }
   .status-strip {
     background: #f6f8fb;
@@ -227,31 +344,6 @@ CUSTOM_CSS = """
     font-size: 0.95rem;
     line-height: 1.5;
     margin-top: 0.45rem;
-  }
-  .workflow-step {
-    background: #ffffff;
-    border: 1px solid #dfe4ec;
-    border-radius: 8px;
-    color: #313647;
-    margin-bottom: 0.55rem;
-    padding: 0.7rem 0.75rem;
-  }
-  .workflow-step.active {
-    background: #fff2f2;
-    border-color: #ff4b4b;
-  }
-  .workflow-step.complete {
-    background: #f0fbf4;
-    border-color: #43a15f;
-  }
-  .workflow-title {
-    font-size: 0.92rem;
-    font-weight: 740;
-    margin-bottom: 0.18rem;
-  }
-  .workflow-caption {
-    color: #697386;
-    font-size: 0.8rem;
   }
   .sidebar-badge {
     background: #f6f8fb;
@@ -347,13 +439,16 @@ CUSTOM_CSS = """
     padding: 1rem;
   }
   @media (max-width: 1100px) {
-    .metric-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+    .summary-grid {
+      grid-template-columns: 1fr;
     }
   }
   @media (max-width: 760px) {
-    .metric-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+    .step-row {
+      grid-template-columns: 2rem 1fr;
+    }
+    .step-state {
+      grid-column: 2;
     }
     .wv-table th, .wv-table td {
       font-size: 0.78rem;
@@ -548,6 +643,88 @@ def _render_metric_cards(cards: list[tuple[str, str, str]]) -> None:
         )
     body.append("</div>")
     st.markdown("".join(body), unsafe_allow_html=True)
+
+
+def _render_summary_card(title: str, rows: list[tuple[str, str]]) -> None:
+    body = [f"<div class='summary-card'><div class='summary-title'>{html.escape(title)}</div>"]
+    for label, value in rows:
+        body.append(
+            "<div class='summary-line'>"
+            f"<span class='summary-label'>{html.escape(label)}</span>"
+            f"<span class='summary-value'>{html.escape(value)}</span>"
+            "</div>"
+        )
+    body.append("</div>")
+    st.markdown("".join(body), unsafe_allow_html=True)
+
+
+def _workflow_stage(metrics: dict) -> int:
+    if int(metrics.get("unique_companies") or 0) <= 0:
+        return 1
+    if int(metrics.get("openai_scored") or 0) <= 0:
+        return 2
+    return 3
+
+
+def _step_row(number: int, label: str, detail: str, state: str) -> str:
+    state_class = "active" if state == "Active" else "complete" if state == "Done" else ""
+    return (
+        f"<div class='step-row {state_class}'>"
+        f"<div class='step-number'>{number}</div>"
+        "<div>"
+        f"<div class='step-label'>{html.escape(label)}</div>"
+        f"<div class='step-detail'>{html.escape(detail)}</div>"
+        "</div>"
+        f"<div class='step-state'>{html.escape(state)}</div>"
+        "</div>"
+    )
+
+
+def _render_guided_steps(metrics: dict) -> None:
+    stage = _workflow_stage(metrics)
+    rows = [
+        _step_row(
+            1,
+            "Prepare source list",
+            "Load the Manifest attendee file, remove duplicates, and screen out obvious non-prospects.",
+            "Done" if stage > 1 else "Active",
+        ),
+        _step_row(
+            2,
+            "Verify prospects",
+            "Run search enrichment and OpenAI scoring for the next capped batch.",
+            "Done" if stage > 2 else "Active" if stage == 2 else "Locked",
+        ),
+        _step_row(
+            3,
+            "Review results",
+            "Use the verified prospect list, charts, company detail, and CSV exports.",
+            "Active" if stage == 3 else "Locked",
+        ),
+    ]
+    st.markdown(
+        "<div class='step-list'>" + "".join(rows) + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _selected_model_pricing(model_name: str) -> dict[str, float]:
+    return OPENAI_MODEL_PRESETS.get(
+        model_name,
+        {
+            "input": st.session_state.get("custom_input_cost", 1.25),
+            "output": st.session_state.get("custom_output_cost", 10.00),
+        },
+    )
+
+
+def _settings_for_run(settings, model_name: str, input_cost: float, output_cost: float):
+    return replace(
+        settings,
+        openai_model=model_name,
+        openai_input_cost_per_1m_tokens=float(input_cost),
+        openai_output_cost_per_1m_tokens=float(output_cost),
+    )
 
 
 def _score_band_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -775,8 +952,7 @@ selected_sectors: list[str] = []
 selected_confidence: list[str] = []
 
 with st.sidebar:
-    st.markdown("### Workflow")
-    _render_workflow(metrics)
+    st.markdown("### Display")
     st.markdown(
         "<div class='sidebar-badge'><strong>Tavily</strong>: "
         f"{'configured' if settings.tavily_api_key else 'missing key'}</div>"
@@ -786,24 +962,17 @@ with st.sidebar:
     )
     st.caption(f"SQLite: `{display_database_path}`")
 
-    prospect_cap = st.number_input(
-        "Prospects to verify",
-        min_value=1,
-        max_value=500,
-        value=int(st.session_state.get("prospect_cap", min(settings.max_score, 100))),
-        step=5,
-        key="prospect_cap",
-    )
     source_rows_shown = st.number_input(
-        "Source rows shown",
+        "Rows in source table",
         min_value=10,
         max_value=500,
         value=int(st.session_state.get("source_rows_shown", 75)),
         step=10,
         key="source_rows_shown",
+        help="How many rows to show in the Source list tab. This does not change API calls.",
     )
 
-    with st.expander("Scoring weights", expanded=True):
+    with st.expander("Review scoring weights", expanded=False):
         for key, default in DEFAULT_WEIGHTS.items():
             weights[key] = st.slider(
                 _humanize(key),
@@ -827,36 +996,106 @@ with st.sidebar:
             selected_sectors = st.multiselect("Sector", all_sectors, default=[], format_func=_humanize)
             selected_confidence = st.multiselect("Confidence", confidence_options, default=[], format_func=_humanize)
 
-    with st.expander("Cache and pricing", expanded=False):
-        st.caption(
-            f"OpenAI {settings.openai_model}: "
-            f"${settings.openai_input_cost_per_1m_tokens:g}/1M input tokens, "
-            f"${settings.openai_output_cost_per_1m_tokens:g}/1M output tokens."
+    with st.expander("Advanced maintenance", expanded=False):
+        st.caption("These controls are not part of the normal 1-2-3 workflow.")
+        force_refresh = st.checkbox(
+            "Ignore cache on next API run",
+            value=False,
+            key="force_refresh",
+            help="Normally off. Turn on only when you intentionally want to pay for fresh Tavily/OpenAI results.",
         )
-        st.caption(f"Tavily estimate: ${settings.tavily_cost_per_call_usd:g} per search call.")
-        force_refresh = st.checkbox("Force refresh cached API records", value=False, key="force_refresh")
-        if st.button("Check cache reuse", use_container_width=True):
+        if st.button("Test cache reuse", use_container_width=True):
             with st.spinner("Checking SQLite cache reuse..."):
                 result = verify_cache_reuse(conn, settings)
             level = "success" if result.counts.get("verified") else "warning"
             st.session_state["last_action"] = {"message": result.message, "level": level}
-        if st.button("Initialize database", use_container_width=True):
+        if st.button("Create missing SQLite tables", use_container_width=True):
             db.init_db(conn)
-            st.session_state["last_action"] = {"message": "Database initialized.", "level": "success"}
+            st.session_state["last_action"] = {"message": "SQLite schema checked and missing tables/columns were created.", "level": "success"}
 
 st.markdown(
     """
     <div class="wv-header">
-      <p class="wv-eyebrow">Wittington Ventures</p>
       <h1 class="wv-title">Manifest Prospecting Tool</h1>
-      <p class="wv-subtitle">Turn the messy Manifest attendee file into a smaller set of externally verified venture prospects.</p>
+      <p class="wv-subtitle">Wittington Ventures workflow for turning the messy Manifest attendee file into a smaller set of externally verified venture prospects.</p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-action_cols = st.columns((1, 1, 2))
-if action_cols[0].button("Prepare source list", use_container_width=True):
+workflow_stage = _workflow_stage(metrics)
+
+st.markdown("<div class='guided-kicker'>Guided workflow</div>", unsafe_allow_html=True)
+if workflow_stage == 1:
+    st.markdown("<div class='guided-title'>Step 1: Prepare the source list</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='guided-copy'>Start here. This loads the Manifest attendee file, deduplicates names, and creates the first screen without using paid APIs.</div>",
+        unsafe_allow_html=True,
+    )
+elif workflow_stage == 2:
+    st.markdown("<div class='guided-title'>Step 2: Verify prospects with APIs</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='guided-copy'>Next, choose the batch size and model, then run search enrichment and OpenAI scoring for the next high-priority companies.</div>",
+        unsafe_allow_html=True,
+    )
+else:
+    st.markdown("<div class='guided-title'>Step 3: Review verified prospects</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='guided-copy'>The verified prospect list is ready. Review the results below, or run another API batch if you want more companies scored.</div>",
+        unsafe_allow_html=True,
+    )
+_render_guided_steps(metrics)
+
+selected_model = st.session_state.get("selected_openai_model", settings.openai_model)
+if selected_model not in OPENAI_MODEL_PRESETS:
+    selected_model = settings.openai_model if settings.openai_model in OPENAI_MODEL_PRESETS else "gpt-4o-mini"
+model_pricing = _selected_model_pricing(selected_model)
+prospect_cap = int(st.session_state.get("prospect_cap", min(settings.max_score, 100)))
+runtime_settings = _settings_for_run(settings, selected_model, model_pricing["input"], model_pricing["output"])
+
+if workflow_stage >= 2:
+    settings_cols = st.columns((1, 1, 1))
+    prospect_cap = settings_cols[0].number_input(
+        "Companies to verify now",
+        min_value=1,
+        max_value=500,
+        value=int(st.session_state.get("prospect_cap", min(settings.max_score, 100))),
+        step=5,
+        key="prospect_cap",
+        help="Maximum number of high-priority companies to enrich and score in this API run.",
+    )
+    selected_model = settings_cols[1].selectbox(
+        "OpenAI scoring model",
+        list(OPENAI_MODEL_PRESETS.keys()),
+        index=list(OPENAI_MODEL_PRESETS.keys()).index(selected_model),
+        key="selected_openai_model",
+        help="Model name sent to OpenAI for the scoring step.",
+    )
+    model_pricing = _selected_model_pricing(selected_model)
+    runtime_settings = _settings_for_run(settings, selected_model, model_pricing["input"], model_pricing["output"])
+    settings_cols[2].markdown(
+        f"**Cost estimate**  \n"
+        f"Input: `${model_pricing['input']:g}` / 1M tokens  \n"
+        f"Output: `${model_pricing['output']:g}` / 1M tokens  \n"
+        f"Search: `${settings.tavily_cost_per_call_usd:g}` / call"
+    )
+
+if workflow_stage == 1:
+    primary_label = "1. Load and screen source data"
+elif workflow_stage == 2:
+    primary_label = "2. Verify prospects with APIs"
+else:
+    primary_label = "Verify another batch"
+
+if st.button(primary_label, type="primary", use_container_width=True):
+    if workflow_stage == 1:
+        run_step = "source"
+    else:
+        run_step = "verify"
+else:
+    run_step = None
+
+if run_step == "source":
     load_result = _run_and_store("Loading attendee names...", lambda: load_attendees(conn, settings))
     classify_result = _run_and_store("Classifying source data...", lambda: run_deterministic_classification(conn))
     st.session_state["last_action"] = {
@@ -865,7 +1104,7 @@ if action_cols[0].button("Prepare source list", use_container_width=True):
     }
     frame, metrics = _load_frame_and_metrics(conn)
 
-if action_cols[1].button("Generate refined prospects", use_container_width=True):
+if run_step == "verify":
     cap = int(prospect_cap)
     progress = st.progress(0, text=f"Refreshing source screening before verifying up to {cap:,} companies...")
     preview = st.empty()
@@ -904,14 +1143,14 @@ if action_cols[1].button("Generate refined prospects", use_container_width=True)
 
     enrich_result = enrich_candidates(
         conn,
-        settings,
+        runtime_settings,
         cap,
         bool(st.session_state.get("force_refresh", False)),
         progress_callback=enrichment_progress,
     )
     score_result = score_enriched_candidates(
         conn,
-        settings,
+        runtime_settings,
         cap,
         bool(st.session_state.get("force_refresh", False)),
         progress_callback=scoring_progress,
@@ -953,16 +1192,28 @@ lifetime_api_calls = int(run_totals.get("tavily_calls") or 0) + int(run_totals.g
 lifetime_cost = float(run_totals.get("estimated_cost_usd") or 0)
 cost_per_verified = lifetime_cost / int(metrics["openai_scored"] or 1) if metrics.get("openai_scored") else 0
 
-_render_metric_cards(
-    [
-        ("Raw attendee rows", _format_int(metrics["raw_companies"]), f"{_format_int(metrics['unique_companies'])} unique names"),
-        ("Screened candidates", _format_int(candidate_count), f"{_pct(candidate_count, metrics['unique_companies'])} of unique"),
-        ("Evidence enriched", _format_int(metrics["enriched"]), f"{_pct(metrics['enriched'], candidate_count)} of candidates"),
-        ("Verified prospects", _format_int(len(prospects)), f"{_format_int(metrics['openai_scored'])} API-scored"),
-        ("Last API calls", _format_int(last_api_calls), f"{_format_currency(last_run.get('estimated_cost_usd'))} latest run"),
-        ("Tokens tracked", _format_int(run_totals.get("total_tokens")), f"{_format_currency(cost_per_verified)} per API-scored company"),
-    ]
-)
+summary_cols = st.columns(2)
+with summary_cols[0]:
+    _render_summary_card(
+        "Pipeline status",
+        [
+            ("Source rows", f"{_format_int(metrics['raw_companies'])} raw / {_format_int(metrics['unique_companies'])} unique"),
+            ("Screened candidates", f"{_format_int(candidate_count)} ({_pct(candidate_count, metrics['unique_companies'])})"),
+            ("Evidence enriched", f"{_format_int(metrics['enriched'])} ({_pct(metrics['enriched'], candidate_count)})"),
+            ("Verified prospects", f"{_format_int(len(prospects))} shown / {_format_int(metrics['openai_scored'])} API-scored"),
+        ],
+    )
+with summary_cols[1]:
+    _render_summary_card(
+        "API usage and cost",
+        [
+            ("Current model", str(runtime_settings.openai_model)),
+            ("Model price estimate", f"${runtime_settings.openai_input_cost_per_1m_tokens:g} in / ${runtime_settings.openai_output_cost_per_1m_tokens:g} out per 1M tokens"),
+            ("Last run", f"{_format_int(last_api_calls)} calls / {_format_currency(last_run.get('estimated_cost_usd'))}"),
+            ("All tracked usage", f"{_format_int(run_totals.get('total_tokens'))} tokens / {_format_currency(lifetime_cost)}"),
+            ("Average per API-scored company", _format_currency(cost_per_verified)),
+        ],
+    )
 
 if frame.empty:
     st.warning("No companies loaded yet. Use Prepare source list to load and classify the Manifest attendee file.")
