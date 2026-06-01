@@ -536,6 +536,64 @@ CUSTOM_CSS = """
     min-width: 0;
     overflow-wrap: anywhere;
   }
+  .source-list {
+    display: grid;
+    gap: 0.75rem;
+    margin: 0.4rem 0 1rem 0;
+  }
+  .source-card {
+    background: #ffffff;
+    border: 1px solid #e5e9ef;
+    border-radius: 8px;
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: minmax(14rem, 1.2fr) minmax(12rem, 0.8fr);
+    padding: 0.9rem;
+  }
+  .source-name {
+    color: #202332;
+    font-size: 1rem;
+    font-weight: 760;
+    line-height: 1.32;
+    overflow-wrap: anywhere;
+  }
+  .source-raw {
+    color: #697386;
+    font-size: 0.84rem;
+    line-height: 1.35;
+    margin-top: 0.26rem;
+    overflow-wrap: anywhere;
+  }
+  .source-meta {
+    align-items: baseline;
+    display: flex;
+    gap: 0.45rem;
+    color: #202332;
+    font-size: 0.84rem;
+    font-weight: 650;
+    margin-top: 0.45rem;
+  }
+  .source-score {
+    min-width: 0;
+  }
+  .evidence-list {
+    display: grid;
+    gap: 0.75rem;
+    margin-top: 0.35rem;
+  }
+  .evidence-card {
+    background: #ffffff;
+    border: 1px solid #e5e9ef;
+    border-radius: 8px;
+    padding: 0.85rem;
+  }
+  .evidence-link {
+    color: #1559b7;
+    font-size: 0.98rem;
+    font-weight: 720;
+    line-height: 1.35;
+    text-decoration: none;
+  }
   @media (max-width: 1100px) {
     .summary-grid {
       grid-template-columns: 1fr;
@@ -548,6 +606,9 @@ CUSTOM_CSS = """
     }
     .prospect-evidence {
       grid-column: 1 / -1;
+    }
+    .source-card {
+      grid-template-columns: 1fr;
     }
   }
   @media (max-width: 760px) {
@@ -576,6 +637,12 @@ CUSTOM_CSS = """
       grid-template-columns: 1fr;
     }
     .prospect-evidence {
+      grid-column: auto;
+    }
+    .source-card {
+      grid-template-columns: 1fr;
+    }
+    .source-score {
       grid-column: auto;
     }
   }
@@ -634,7 +701,9 @@ def _humanize(value: str | None) -> str:
 
 
 def _clean_ui_text(value: object) -> str:
-    return str(value or "").replace(chr(59), ",").replace(chr(8212), "-")
+    clean = str(value or "").replace(chr(59), ",").replace(chr(8212), "-")
+    clean = clean.replace("##", "").replace("#", "")
+    return " ".join(clean.split())
 
 
 def _normalized_display_name(value: str | None) -> str:
@@ -1086,6 +1155,53 @@ def _render_prospect_cards(frame: pd.DataFrame, empty_message: str) -> None:
     st.markdown(_prospect_cards_html(frame, empty_message), unsafe_allow_html=True)
 
 
+def _source_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
+    if frame.empty:
+        return f"<div class='empty-state'>{html.escape(empty_message)}</div>"
+    body = ["<div class='source-list'>"]
+    for _, row in frame.iterrows():
+        score = int(row.get("weighted_score") or 0)
+        body.append(
+            "<div class='source-card'>"
+            "<div>"
+            f"<div class='source-name'>{html.escape(_clean_ui_text(row.get('canonical_name')))}</div>"
+            f"<div class='source-raw'>Raw entry: {html.escape(_clean_ui_text(row.get('raw_name')))}</div>"
+            f"<div class='source-meta'>{_format_int(row.get('duplicate_count'))} source row{'s' if int(row.get('duplicate_count') or 0) != 1 else ''}</div>"
+            "</div>"
+            "<div class='source-score'>"
+            "<div class='prospect-score-label'>Screen score</div>"
+            "<div class='score-cell'>"
+            "<div class='score-track'>"
+            f"<span class='score-fill' style='width:{max(0, min(100, score))}%'></span>"
+            "</div>"
+            f"<span class='score-number'>{score}</span>"
+            "</div>"
+            f"<div class='prospect-tags'>{_tag_pills(row.get('sector_tags'))}</div>"
+            "</div>"
+            "</div>"
+        )
+    body.append("</div>")
+    return "".join(body)
+
+
+def _render_source_cards(frame: pd.DataFrame, empty_message: str) -> None:
+    st.markdown(_source_cards_html(frame, empty_message), unsafe_allow_html=True)
+
+
+def _evidence_cards_html(urls: list[str], titles: list[str], snippets: list[str]) -> str:
+    body = ["<div class='evidence-list'>"]
+    for index, url in enumerate(urls):
+        title = _clean_ui_text(titles[index] if index < len(titles) else url)
+        safe_url = html.escape(str(url or ""), quote=True)
+        body.append(
+            "<div class='evidence-card'>"
+            f"<a class='evidence-link' href='{safe_url}' target='_blank' rel='noopener noreferrer'>{html.escape(title)}</a>"
+            "</div>"
+        )
+    body.append("</div>")
+    return "".join(body)
+
+
 def _render_workflow(metrics: dict) -> None:
     has_source = int(metrics.get("unique_companies") or 0) > 0
     has_verified = int(metrics.get("openai_scored") or 0) > 0
@@ -1487,17 +1603,8 @@ else:
             f"<div class='quiet-note'>Showing {_format_int(len(source_rows))} de-duplicated source rows from {_format_int(len(weighted_frame))} unique company names.</div>",
             unsafe_allow_html=True,
         )
-        _render_table(
+        _render_source_cards(
             source_rows,
-            [
-                ("raw_name", "Raw attendee entry", "text"),
-                ("canonical_name", "Cleaned company", "company"),
-                ("source_status", "Status", "text"),
-                ("deterministic_type_display", "Rule bucket", "text"),
-                ("sector_tags", "Sectors", "tags"),
-                ("weighted_score", "Screen score", "score"),
-                ("duplicate_count", "Rows", "number"),
-            ],
             "No source rows loaded.",
         )
         source_export = weighted_frame[
@@ -1597,7 +1704,6 @@ else:
             st.markdown(
                 "<div class='detail-box'>"
                 f"<div class='detail-title'>{html.escape(_clean_ui_text(selected_row['canonical_name']))}</div>"
-                f"<div class='detail-text'><strong>Rule bucket:</strong> {html.escape(_clean_ui_text(selected_row.get('deterministic_type_display') or ''))}</div>"
                 f"<div class='detail-text'><strong>Rationale:</strong> {html.escape(_clean_ui_text(selected_row.get('rationale') or 'No rationale yet.'))}</div>"
                 f"<div class='detail-text'><strong>Evidence:</strong> {html.escape(_clean_ui_text(selected_row.get('evidence_summary') or 'No external evidence yet.'))}</div>"
                 "</div>",
@@ -1621,9 +1727,4 @@ else:
             snippets = selected_row.get("top_snippets") or []
             if urls:
                 st.markdown("<div class='section-label'>Retrieved evidence</div>", unsafe_allow_html=True)
-                for index, url in enumerate(urls):
-                    title = titles[index] if index < len(titles) else url
-                    snippet = snippets[index] if index < len(snippets) else ""
-                    st.markdown(f"- [{html.escape(title)}]({url})")
-                    if snippet:
-                        st.caption(snippet)
+                st.markdown(_evidence_cards_html(urls, titles, snippets), unsafe_allow_html=True)

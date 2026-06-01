@@ -9,7 +9,7 @@ Hosted app: https://wv-manifest-prospecting-tool-b8jadagmhgsh8wirbknjb9.streamli
 ## Current App
 
 - Guided Streamlit workflow with three steps: prepare source list, verify prospects, review results.
-- Source list view for the messy attendee data after cleaning, dedupe, and rule screening.
+- Responsive source cards for messy attendee data after cleaning, dedupe, and rule screening.
 - Verified prospects view for companies that passed evidence enrichment and API scoring.
 - Larger full-width charts with horizontal labels for readability.
 - Responsive prospect cards so company descriptions and sector tags stay readable across desktop, tablet, and mobile.
