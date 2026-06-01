@@ -999,6 +999,10 @@ def _settings_for_run(settings, model_name: str, input_cost: float, output_cost:
     )
 
 
+def _setting(settings, name: str, default):
+    return getattr(settings, name, default)
+
+
 def _local_openai_estimate_usd(metrics: dict, settings) -> float:
     openai_stage_total = 0.0
     for row in metrics.get("cost_by_stage", []):
@@ -1025,11 +1029,11 @@ def _tavily_billing_from_metrics(metrics: dict, settings) -> TavilyBillingSummar
     totals = metrics.get("run_totals") or {}
     return calculate_tavily_billing(
         credits_used=int(totals.get("tavily_calls") or 0),
-        included_monthly_credits=settings.tavily_included_monthly_credits,
-        pay_as_you_go_enabled=settings.tavily_pay_as_you_go_enabled,
-        payg_price_per_credit_usd=settings.tavily_payg_price_per_credit_usd,
-        plan_name=settings.tavily_plan_name,
-        shadow_price_per_credit_usd=settings.tavily_cost_per_call_usd,
+        included_monthly_credits=_setting(settings, "tavily_included_monthly_credits", 1000),
+        pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", False),
+        payg_price_per_credit_usd=_setting(settings, "tavily_payg_price_per_credit_usd", 0.008),
+        plan_name=_setting(settings, "tavily_plan_name", "Researcher"),
+        shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.001),
     )
 
 
@@ -1351,7 +1355,7 @@ with st.sidebar:
         "<div class='sidebar-badge'><strong>OpenAI</strong>: "
         f"{'configured' if settings.openai_api_key else 'missing key'}</div>"
         "<div class='sidebar-badge'><strong>OpenAI billing</strong>: "
-        f"{'admin key configured' if settings.openai_admin_key else 'admin key missing'}</div>",
+        f"{'admin key configured' if _setting(settings, 'openai_admin_key', None) else 'admin key missing'}</div>",
         unsafe_allow_html=True,
     )
     st.caption(f"SQLite: `{display_database_path}`")
@@ -1466,7 +1470,7 @@ if workflow_stage >= 2:
         f"**Local OpenAI estimate**  \n"
         f"Input: `${model_pricing['input']:g}` / 1M tokens  \n"
         f"Output: `${model_pricing['output']:g}` / 1M tokens  \n"
-        f"Tavily: `{settings.tavily_plan_name}` plan credits"
+        f"Tavily: `{_setting(settings, 'tavily_plan_name', 'Researcher')}` plan credits"
     )
 
 if workflow_stage == 1:
@@ -1581,10 +1585,10 @@ last_run = metrics.get("last_run") or {}
 last_api_calls = int(last_run.get("tavily_calls") or 0) + int(last_run.get("openai_calls") or 0)
 tavily_billing = _tavily_billing_from_metrics(metrics, settings)
 openai_billing = fetch_openai_billing_snapshot(
-    admin_key=settings.openai_admin_key,
-    project_id=settings.openai_billing_project_id,
-    lookback_days=settings.openai_billing_lookback_days,
-    cache_ttl_seconds=settings.openai_billing_cache_ttl_seconds,
+    admin_key=_setting(settings, "openai_admin_key", None),
+    project_id=_setting(settings, "openai_billing_project_id", None),
+    lookback_days=_setting(settings, "openai_billing_lookback_days", 31),
+    cache_ttl_seconds=_setting(settings, "openai_billing_cache_ttl_seconds", 300),
 )
 provider_spend = calculate_provider_billed_spend(
     tavily_billing=tavily_billing,

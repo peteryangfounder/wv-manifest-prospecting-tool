@@ -28,6 +28,10 @@ def _estimate_openai_cost(settings: Settings, prompt_tokens: int, completion_tok
     return input_cost + output_cost
 
 
+def _setting(settings: Settings, name: str, default):
+    return getattr(settings, name, default)
+
+
 def load_attendees(conn, settings: Settings) -> PipelineResult:
     run_id = db.start_run(conn, "load_attendees")
     raw_names, metadata = get_attendee_names(settings.manifest_url)
@@ -129,11 +133,11 @@ def enrich_candidates(
 
     tavily_billing = calculate_tavily_billing(
         credits_used=calls,
-        included_monthly_credits=settings.tavily_included_monthly_credits,
-        pay_as_you_go_enabled=settings.tavily_pay_as_you_go_enabled,
-        payg_price_per_credit_usd=settings.tavily_payg_price_per_credit_usd,
-        plan_name=settings.tavily_plan_name,
-        shadow_price_per_credit_usd=settings.tavily_cost_per_call_usd,
+        included_monthly_credits=_setting(settings, "tavily_included_monthly_credits", 1000),
+        pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", False),
+        payg_price_per_credit_usd=_setting(settings, "tavily_payg_price_per_credit_usd", 0.008),
+        plan_name=_setting(settings, "tavily_plan_name", "Researcher"),
+        shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.001),
     )
     db.finish_run(
         conn,
