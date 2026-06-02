@@ -369,12 +369,15 @@ CUSTOM_CSS = """
     display: grid;
     gap: 0;
     grid-template-columns: 1fr;
-    margin: 0.8rem 0 0.95rem 0;
+    margin: 0.55rem 0 1.15rem 0;
   }
   .mini-metric {
     background: #ffffff;
     border-top: 1px solid #edf0f4;
     padding: 0.78rem 0;
+  }
+  .mini-metric:first-child {
+    border-top: 0;
   }
   .mini-metric-label {
     color: #697386;
@@ -388,6 +391,13 @@ CUSTOM_CSS = """
     font-weight: 780;
     line-height: 1.2;
     margin-top: 0.12rem;
+  }
+  .mini-metric-copy {
+    color: #697386;
+    font-size: 0.86rem;
+    line-height: 1.45;
+    margin-top: 0.22rem;
+    max-width: 620px;
   }
   .guided-fact-stack {
     border-top: 1px solid #edf0f4;
@@ -576,20 +586,24 @@ CUSTOM_CSS = """
   }
   .summary-card {
     background: #ffffff;
-    border-top: 1px solid #edf0f4;
-    margin-top: 0.9rem;
-    padding: 0.85rem 0 0 0;
+    margin-top: 0.95rem;
+    padding: 0;
   }
   .summary-title {
+    border-top: 1px solid #edf0f4;
     color: #202332;
     font-size: 1rem;
     font-weight: 760;
     margin-bottom: 0.25rem;
+    padding-top: 1rem;
   }
   .summary-line {
     border-top: 1px solid #edf0f4;
     display: block;
     padding: 0.75rem 0;
+  }
+  .summary-title + .summary-line {
+    border-top: 0;
   }
   .summary-label {
     color: #697386;
@@ -1229,13 +1243,17 @@ def _render_next_step(label: str, title: str, copy: str) -> None:
     )
 
 
-def _render_mini_metrics(items: list[tuple[str, str]]) -> None:
+def _render_mini_metrics(items: list[tuple]) -> None:
     body = ["<div class='mini-metric-grid'>"]
-    for label, value in items:
+    for item in items:
+        label = item[0]
+        value = item[1]
+        copy = item[2] if len(item) > 2 else ""
         body.append(
             "<div class='mini-metric'>"
             f"<div class='mini-metric-label'>{html.escape(_clean_ui_text(label))}</div>"
             f"<div class='mini-metric-value'>{html.escape(_clean_ui_text(value))}</div>"
+            f"<div class='mini-metric-copy'>{html.escape(_clean_ui_text(copy))}</div>"
             "</div>"
         )
     body.append("</div>")
@@ -2121,6 +2139,10 @@ pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(p
 pending_mode = pending_verify_run.get("mode") if pending_verify_run else verify_mode
 broad_universe_pending = int((pending_verify_run or {}).get("broad_candidate_universe") or metrics.get("candidates") or 0)
 unique_universe_pending = int((pending_verify_run or {}).get("unique_company_universe") or metrics.get("unique_companies") or 0)
+raw_company_count = int(metrics.get("raw_companies") or 0)
+unique_company_count = int(metrics.get("unique_companies") or 0)
+duplicate_rows_merged = max(0, raw_company_count - unique_company_count)
+rule_removed_count = max(0, unique_company_count - candidate_count)
 projected_tavily_overage = int((pending_verify_run or {}).get("projected_tavily_overage") or 0)
 tavily_payg_enabled_pending = bool((pending_verify_run or {}).get("tavily_payg_enabled"))
 projected_rows = []
@@ -2192,10 +2214,26 @@ if slide["key"] == "overview":
 elif slide["key"] == "source":
     _render_mini_metrics(
         [
-            ("Raw rows", _format_int(metrics["raw_companies"])),
-            ("Unique names", _format_int(metrics["unique_companies"])),
-            ("Rows kept for page checks and search", _format_int(candidate_count)),
-            ("OpenAI API + Tavily Search API cost", "$0.0000"),
+            (
+                "Rows read from Manifest",
+                _format_int(raw_company_count),
+                "Each row is one attendee-company entry from the public Manifest attendee list.",
+            ),
+            (
+                "Company names after duplicate merge",
+                _format_int(unique_company_count),
+                f"{_format_int(duplicate_rows_merged)} duplicate row{'s' if duplicate_rows_merged != 1 else ''} merged after company names were normalized.",
+            ),
+            (
+                "Rows kept after rule filtering",
+                _format_int(candidate_count),
+                f"{_format_int(rule_removed_count)} row{'s' if rule_removed_count != 1 else ''} removed: incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names.",
+            ),
+            (
+                "OpenAI API + Tavily Search API cost so far",
+                "$0.0000",
+                "Loading the list, merging duplicates, and applying rules do not call OpenAI or Tavily.",
+            ),
         ]
     )
     _render_summary_card(
@@ -2211,12 +2249,32 @@ elif slide["key"] == "source":
         st.session_state["load_source_requested"] = True
         st.rerun()
 elif slide["key"] == "homepage":
+    homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
+    homepage_scoreable = int(cascade_summary.get("score_from_homepage") or 0)
+    homepage_needs_search = int(cascade_summary.get("needs_tavily") or 0)
+    homepage_data_gaps = int(cascade_summary.get("data_gaps") or 0)
     _render_mini_metrics(
         [
-            ("Company pages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
-            ("Page data used for scoring", _format_int(cascade_summary.get("score_from_homepage") or 0)),
-            ("Companies sent to web search", _format_int(cascade_summary.get("needs_tavily") or 0)),
-            ("Companies without enough page data", _format_int(cascade_summary.get("data_gaps") or 0)),
+            (
+                "Company pages checked",
+                _format_int(homepage_checked),
+                "The app tries the company domain and reads homepage title, description, headings, and short text.",
+            ),
+            (
+                "Page data used for scoring",
+                _format_int(homepage_scoreable),
+                "These companies had enough homepage text to send to OpenAI scoring without Tavily Search API.",
+            ),
+            (
+                "Companies sent to web search",
+                _format_int(homepage_needs_search),
+                "These companies did not have enough homepage text, so the next step uses Tavily Search API.",
+            ),
+            (
+                "Companies without enough page data",
+                _format_int(homepage_data_gaps),
+                "These rows had no usable homepage text from the page check.",
+            ),
         ]
     )
     _render_summary_card(
@@ -2253,10 +2311,26 @@ elif slide["key"] == "estimate":
     if pending_verify_run:
         _render_mini_metrics(
             [
-                ("Companies", _format_int(pending_verify_run["cap"])),
-                ("Tavily Search API calls", _format_int(pending_verify_run["projected_tavily_calls"])),
-                ("OpenAI API scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
-                ("Estimated OpenAI API + Tavily Search API cost", _format_currency(pending_verify_run["projected_total"])),
+                (
+                    "Companies in this run",
+                    _format_int(pending_verify_run["cap"]),
+                    "This is the maximum number of companies that can move through search and scoring after approval.",
+                ),
+                (
+                    "Tavily Search API calls",
+                    _format_int(pending_verify_run["projected_tavily_calls"]),
+                    "One Tavily Search API call is planned for each company that still needs web search.",
+                ),
+                (
+                    "OpenAI API scoring calls",
+                    _format_int(pending_verify_run["projected_openai_calls"]),
+                    "One OpenAI API call is planned for each company with page text or search results ready for scoring.",
+                ),
+                (
+                    "Estimated OpenAI API + Tavily Search API cost",
+                    _format_currency(pending_verify_run["projected_total"]),
+                    "This combines estimated OpenAI token cost with any Tavily Search API pay-as-you-go overage.",
+                ),
             ]
         )
         _render_summary_card("Run estimate", projected_rows)
@@ -2270,10 +2344,26 @@ elif slide["key"] == "estimate":
 elif slide["key"] == "cost":
     _render_mini_metrics(
         [
-            ("OpenAI API + Tavily Search API + Streamlit Cloud hosting billed cost", _format_billed_total(provider_spend)),
-            ("OpenAI API tokens", _format_int(int(run_totals.get("total_tokens") or 0))),
-            ("Tavily Search API credits used", _format_int(tavily_billing.credits_used)),
-            ("Scored from company pages", _format_int(tavily_avoided)),
+            (
+                "OpenAI API + Tavily Search API + Streamlit Cloud hosting billed cost",
+                _format_billed_total(provider_spend),
+                "This combines OpenAI API billing, Tavily Search API pay-as-you-go billing, and Streamlit Cloud hosting cost.",
+            ),
+            (
+                "OpenAI API tokens",
+                _format_int(int(run_totals.get("total_tokens") or 0)),
+                "These are prompt and output tokens used by OpenAI API scoring calls.",
+            ),
+            (
+                "Tavily Search API credits used",
+                _format_int(tavily_billing.credits_used),
+                "Tavily counts one search request as one credit against the configured plan.",
+            ),
+            (
+                "Scored from company pages",
+                _format_int(tavily_avoided),
+                "These companies used homepage text for OpenAI scoring without Tavily Search API.",
+            ),
         ]
     )
     _render_cost_hero(
