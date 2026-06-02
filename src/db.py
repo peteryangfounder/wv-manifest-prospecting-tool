@@ -830,6 +830,7 @@ def metrics(conn: sqlite3.Connection) -> dict[str, Any]:
     enrichment_count = conn.execute(
         "SELECT COUNT(DISTINCT company_id) FROM enrichments WHERE provider IN ('tavily', 'homepage') AND status = 'success'"
     ).fetchone()[0]
+    classified_count = conn.execute("SELECT COUNT(*) FROM companies WHERE deterministic_type IS NOT NULL").fetchone()[0]
     scored_count = conn.execute("SELECT COUNT(*) FROM scores").fetchone()[0]
     openai_count = conn.execute("SELECT COUNT(*) FROM scores WHERE provider = 'openai'").fetchone()[0]
     last_run = conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 1").fetchone()
@@ -864,6 +865,7 @@ def metrics(conn: sqlite3.Connection) -> dict[str, Any]:
         "unique_companies": int(row["unique_companies"] or 0),
         "candidates": int(row["candidates"] or 0),
         "high_priority_queue": int(row["high_priority_queue"] or 0),
+        "classified": int(classified_count or 0),
         "enriched": int(enrichment_count or 0),
         "scored": int(scored_count or 0),
         "openai_scored": int(openai_count or 0),

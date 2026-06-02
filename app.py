@@ -1501,9 +1501,11 @@ def _render_cost_hero(
 def _workflow_stage(metrics: dict) -> int:
     if int(metrics.get("unique_companies") or 0) <= 0:
         return 1
-    if int(metrics.get("openai_scored") or 0) <= 0:
+    if int(metrics.get("classified") or 0) <= 0:
         return 2
-    return 3
+    if int(metrics.get("openai_scored") or 0) <= 0:
+        return 3
+    return 4
 
 
 def _step_row(number: int, label: str, detail: str, state: str) -> str:
@@ -1595,7 +1597,7 @@ def _render_processing_controls(candidate_count: int, current_cap: int) -> int:
         st.markdown(
             "<div class='control-group'>"
             "<div class='control-title'>Rows to process</div>"
-            "<div class='control-copy'>Load the Manifest list first. The row-count choices use the rows that remain after duplicate company names, placeholder names, and excluded organization types are removed.</div>"
+            "<div class='control-copy'>Remove excluded rows first. The row-count choices use the companies that remain after incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names are removed.</div>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -2170,11 +2172,19 @@ if st.session_state.pop("clear_processing_cache_requested", False):
     frame, metrics = _load_frame_and_metrics(conn)
     st.rerun()
 
-if st.session_state.pop("load_source_requested", False):
+if st.session_state.pop("load_manifest_requested", False):
     load_result = _run_and_store("Loading attendee names...", lambda: load_attendees(conn, settings))
+    st.session_state["last_action"] = {
+        "message": load_result.message,
+        "level": "success",
+    }
+    frame, metrics = _load_frame_and_metrics(conn)
+    st.rerun()
+
+if st.session_state.pop("prepare_manifest_requested", False):
     classify_result = _run_and_store("Classifying source data...", lambda: run_deterministic_classification(conn))
     st.session_state["last_action"] = {
-        "message": f"{load_result.message} {classify_result.message}",
+        "message": classify_result.message,
         "level": "success",
     }
     frame, metrics = _load_frame_and_metrics(conn)
@@ -2280,7 +2290,9 @@ candidate_count = int(weighted_frame["is_candidate"].sum()) if not weighted_fram
 raw_company_count = int(metrics.get("raw_companies") or 0)
 unique_company_count = int(metrics.get("unique_companies") or 0)
 duplicate_rows_merged = max(0, raw_company_count - unique_company_count)
-excluded_or_placeholder_count = max(0, unique_company_count - candidate_count)
+classified_count = int(metrics.get("classified") or 0)
+exclusions_applied = classified_count > 0
+excluded_or_placeholder_count = max(0, unique_company_count - candidate_count) if exclusions_applied else 0
 prospect_cap_limit = max(1, candidate_count or unique_company_count or int(settings.max_score or 1))
 prospect_cap = max(1, min(int(prospect_cap or prospect_cap_limit), prospect_cap_limit))
 run_totals = metrics.get("run_totals") or {}
@@ -2317,7 +2329,7 @@ last_run_local_openai_estimate = _last_run_local_openai_estimate_usd(last_run)
 cascade_summary = db.homepage_evidence_summary(conn, mode=verify_mode) if not frame.empty else {}
 tavily_avoided = int(cascade_summary.get("score_from_homepage") or 0)
 
-pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode) if workflow_stage >= 2 else None
+pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode) if workflow_stage >= 3 else None
 pending_mode = pending_verify_run.get("mode") if pending_verify_run else verify_mode
 broad_universe_pending = int((pending_verify_run or {}).get("broad_candidate_universe") or metrics.get("candidates") or 0)
 unique_universe_pending = int((pending_verify_run or {}).get("unique_company_universe") or metrics.get("unique_companies") or 0)
@@ -2371,12 +2383,13 @@ if not cost_stage_table.empty:
 
 slides = [
     {"key": "overview", "label": "Overview", "title": "Manifest list to scored companies.", "copy": "Load company names, remove excluded organization types and placeholder names, check company pages, run web search when page data is incomplete, then score the remaining companies."},
-    {"key": "source", "label": "Step 1", "title": "Prepare the Manifest list.", "copy": "Load attendee company names, merge duplicate company names, and remove rows that match excluded organization types."},
-    {"key": "homepage", "label": "Step 2", "title": "Check company pages.", "copy": "Read domains, page titles, descriptions, headings, and short homepage text before web search."},
-    {"key": "estimate", "label": "Step 3", "title": "Approve the run.", "copy": "Check the batch size, Tavily Search API calls, OpenAI API scoring calls, runtime, OpenAI API tokens, and estimated API cost."},
-    {"key": "cost", "label": "Step 4", "title": "Track OpenAI API and Tavily Search API cost.", "copy": "View OpenAI API billing, Tavily Search API credits, and OpenAI token-count estimates separately."},
-    {"key": "prospects", "label": "Step 5", "title": "View scored companies.", "copy": "Sort companies by total score and inspect the page text or search results used for scoring."},
-    {"key": "routing", "label": "Step 6", "title": "View company page and web search counts.", "copy": "See which companies were scored from company page data and which companies were sent to web search."},
+    {"key": "source", "label": "Step 1", "title": "Load the Manifest list.", "copy": "Import attendee company names from the public Manifest attendee list."},
+    {"key": "exclusions", "label": "Step 2", "title": "Remove excluded rows.", "copy": "Merge duplicate company names and remove incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names."},
+    {"key": "homepage", "label": "Step 3", "title": "Check company pages.", "copy": "Read domains, page titles, descriptions, headings, and short homepage text before web search."},
+    {"key": "estimate", "label": "Step 4", "title": "Approve the run.", "copy": "Check the batch size, Tavily Search API calls, OpenAI API scoring calls, runtime, OpenAI API tokens, and estimated API cost."},
+    {"key": "cost", "label": "Step 5", "title": "Track OpenAI API and Tavily Search API cost.", "copy": "View OpenAI API billing, Tavily Search API credits, and OpenAI token-count estimates separately."},
+    {"key": "prospects", "label": "Step 6", "title": "View scored companies.", "copy": "Sort companies by total score and inspect the page text or search results used for scoring."},
+    {"key": "routing", "label": "Step 7", "title": "View company page and web search counts.", "copy": "See which companies were scored from company page data and which companies were sent to web search."},
 ]
 slide_count = len(slides)
 slide_index = int(st.session_state.get("slide_index", 0))
@@ -2429,29 +2442,65 @@ elif slide["key"] == "source":
                 f"{_format_int(duplicate_rows_merged)} duplicate row{'s' if duplicate_rows_merged != 1 else ''} merged after company names were normalized.",
             ),
             (
+                "OpenAI API + Tavily Search API cost so far",
+                "$0.0000",
+                "Loading the Manifest list does not call OpenAI or Tavily.",
+            ),
+        ]
+    )
+    _render_summary_card(
+        "Manifest list load",
+        [
+            ("Input", "Public Manifest attendee list"),
+            ("Saved rows", f"{_format_int(unique_company_count)} company names"),
+            ("Duplicate company names", f"{_format_int(duplicate_rows_merged)} duplicate row{'s' if duplicate_rows_merged != 1 else ''} merged"),
+            ("Next", "Remove incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names"),
+        ],
+    )
+    if workflow_stage == 1 and st.button("Load Manifest list", type="primary", use_container_width=True):
+        st.session_state["load_manifest_requested"] = True
+        st.rerun()
+elif slide["key"] == "exclusions":
+    _render_mini_metrics(
+        [
+            (
+                "Company names before exclusions",
+                _format_int(unique_company_count),
+                "These are the deduplicated company names loaded from the Manifest attendee list.",
+            ),
+            (
                 "Rows kept after duplicate merge and exclusions",
-                _format_int(candidate_count),
-                f"{_format_int(excluded_or_placeholder_count)} row{'s' if excluded_or_placeholder_count != 1 else ''} removed: incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names.",
+                _format_int(candidate_count) if exclusions_applied else "Not calculated",
+                (
+                    f"{_format_int(excluded_or_placeholder_count)} row{'s' if excluded_or_placeholder_count != 1 else ''} removed after applying the excluded organization-type and placeholder-name criteria."
+                    if exclusions_applied
+                    else "Click Remove excluded rows to remove incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names."
+                ),
             ),
             (
                 "OpenAI API + Tavily Search API cost so far",
                 "$0.0000",
-                "Loading the list, merging duplicate company names, and removing excluded organization types do not call OpenAI or Tavily.",
+                "Removing excluded rows does not call OpenAI or Tavily.",
             ),
         ]
     )
     prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
     _render_summary_card(
-        "Manifest list preparation",
+        "Excluded row criteria",
         [
-            ("Input", "Public Manifest attendee list"),
-            ("Cleaned list", "Names normalized and duplicates merged"),
             ("Removed", "Incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names"),
-            ("Remaining rows", f"{_format_int(candidate_count)} companies will be checked with company pages or web search"),
+            (
+                "Remaining rows",
+                f"{_format_int(candidate_count)} companies will be checked with company pages or web search"
+                if exclusions_applied
+                else "Not calculated yet",
+            ),
         ],
     )
-    if workflow_stage == 1 and st.button("Load Manifest list and remove excluded rows", type="primary", use_container_width=True):
-        st.session_state["load_source_requested"] = True
+    if workflow_stage == 1:
+        st.warning("Load the Manifest list before removing excluded rows.")
+    elif workflow_stage == 2 and st.button("Remove excluded rows", type="primary", use_container_width=True):
+        st.session_state["prepare_manifest_requested"] = True
         st.rerun()
 elif slide["key"] == "homepage":
     homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
