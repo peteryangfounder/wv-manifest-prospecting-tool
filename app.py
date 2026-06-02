@@ -200,6 +200,13 @@ CUSTOM_CSS = """
     margin: 0.45rem 0 0 0;
     max-width: 700px;
   }
+  .cache-note {
+    color: #697386;
+    font-size: 0.76rem;
+    line-height: 1.35;
+    margin-top: 0.25rem;
+    text-align: right;
+  }
   .guided-panel {
     background: #ffffff;
     border: 1px solid #dfe5ee;
@@ -539,6 +546,11 @@ CUSTOM_CSS = """
   .stButton > button {
     border-radius: 8px !important;
     min-height: 2.7rem;
+  }
+  .header-cache-control .stButton > button {
+    min-height: 2.15rem;
+    padding: 0.35rem 0.7rem;
+    white-space: nowrap;
   }
   .run-settings {
     background: #f8fafc;
@@ -968,6 +980,9 @@ CUSTOM_CSS = """
     }
   }
   @media (max-width: 760px) {
+    .cache-note {
+      text-align: left;
+    }
     .step-row {
       grid-template-columns: 2rem 1fr;
     }
@@ -2360,6 +2375,16 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+header_cols = st.columns((1, 0.34))
+with header_cols[1]:
+    st.markdown("<div class='header-cache-control'>", unsafe_allow_html=True)
+    if st.button("Clear processing cache", use_container_width=True):
+        st.session_state["clear_processing_cache_requested"] = True
+        st.rerun()
+    st.markdown(
+        "<div class='cache-note'>Keeps run history and API cost records.</div></div>",
+        unsafe_allow_html=True,
+    )
 _render_slide_progress(slide_index, slide_count)
 _render_slide_header(slide["label"], slide["title"], slide["copy"])
 
@@ -2400,16 +2425,6 @@ elif slide["key"] == "source":
         ]
     )
     prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
-    st.markdown(
-        "<div class='control-group'>"
-        "<div class='control-title'>Processing cache</div>"
-        "<div class='control-copy'>Clears company rows, company-page data, Tavily Search API results, and OpenAI API scores. Run history and API cost records stay in the database.</div>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-    if st.button("Clear cached company processing data", use_container_width=True):
-        st.session_state["clear_processing_cache_requested"] = True
-        st.rerun()
     _render_summary_card(
         "Manifest list preparation",
         [
