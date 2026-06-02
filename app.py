@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import time
 from collections import Counter
 from dataclasses import replace
 
@@ -466,9 +467,8 @@ CUSTOM_CSS = """
     max-width: 620px;
   }
   .control-group {
-    border-top: 1px solid #edf0f4;
-    margin: 0.9rem 0 1rem 0;
-    padding-top: 0.9rem;
+    margin: 0.75rem 0 1rem 0;
+    padding-top: 0;
   }
   .control-title {
     color: #202332;
@@ -482,6 +482,13 @@ CUSTOM_CSS = """
     font-size: 0.86rem;
     line-height: 1.45;
     margin-bottom: 0.65rem;
+  }
+  .stRadio input[type="radio"] {
+    accent-color: var(--wv-accent) !important;
+  }
+  .stRadio svg {
+    color: var(--wv-accent) !important;
+    fill: var(--wv-accent) !important;
   }
   .stage-table-block {
     border-top: 1px solid #edf0f4;
@@ -1956,6 +1963,31 @@ def _format_duration(seconds: int) -> str:
     return f"about {minutes} minute" if minutes == 1 else f"about {minutes} minutes"
 
 
+def _format_live_duration(seconds: float) -> str:
+    seconds = max(0, int(round(seconds)))
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, remainder = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {remainder:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m"
+
+
+def _progress_status(label: str, index: int, total: int, started_at: float, suffix: str = "") -> str:
+    total = max(1, int(total or 1))
+    index = max(0, min(int(index or 0), total))
+    pct = (index / total) * 100
+    elapsed = max(0.0, time.perf_counter() - started_at)
+    if index <= 0:
+        eta = "calculating"
+    else:
+        eta_seconds = max(0.0, (elapsed / index) * (total - index))
+        eta = _format_live_duration(eta_seconds)
+    suffix_text = f" - {suffix}" if suffix else ""
+    return f"{label} {index:,}/{total:,} ({pct:.1f}%) - ETA {eta}{suffix_text}"
+
+
 def _score_band_frame(frame: pd.DataFrame) -> pd.DataFrame:
     labels = ["0-19", "20-39", "40-59", "60-79", "80-100"]
     if frame.empty:
@@ -2313,6 +2345,7 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 clear_cache_param = st.query_params.get("clear_processing_cache")
 if clear_cache_param == "1" or clear_cache_param == ["1"]:
     _clear_processing_cache(conn)
+    st.session_state["slide_index"] = 0
     st.session_state["last_action"] = {
         "message": "Cleared raw Manifest rows, company rows, company-page data, Tavily Search API results, and OpenAI API scores. Run history and API cost records were kept.",
         "level": "success",
@@ -2346,6 +2379,7 @@ runtime_settings = _settings_for_run(settings, selected_model, model_pricing["in
 
 if st.session_state.pop("clear_processing_cache_requested", False):
     _clear_processing_cache(conn)
+    st.session_state["slide_index"] = 0
     st.session_state["last_action"] = {
         "message": "Cleared raw Manifest rows, company rows, company-page data, Tavily Search API results, and OpenAI API scores. Run history and API cost records were kept.",
         "level": "success",
@@ -2384,13 +2418,17 @@ if st.session_state.pop("check_company_pages_requested", False):
     active_verify_mode = st.session_state.get("active_verify_mode", verify_mode)
     homepage_cap = max(1, int(st.session_state.get("homepage_check_cap", int(prospect_cap or 1))))
     homepage_workers = max(1, min(_setting_int(settings, "homepage_concurrency", 96), homepage_cap))
-    progress = st.progress(0, text=f"Checking up to {homepage_cap:,} company pages with {homepage_workers:,} parallel workers...")
+    homepage_started_at = time.perf_counter()
+    progress = st.progress(
+        0,
+        text=f"Company page checks 0/{homepage_cap:,} (0.0%) - ETA calculating - {homepage_workers:,} workers",
+    )
 
     def homepage_progress(index, total, result, counts):
         if total:
             progress.progress(
                 min(1.0, index / total),
-                text=f"Company page checks {index:,}/{total:,} with {homepage_workers:,} parallel workers",
+                text=_progress_status("Company page checks", index, total, homepage_started_at, f"{homepage_workers:,} workers"),
             )
 
     homepage_result = collect_homepage_evidence(
@@ -2401,7 +2439,7 @@ if st.session_state.pop("check_company_pages_requested", False):
         progress_callback=homepage_progress,
         mode=active_verify_mode,
     )
-    progress.progress(1.0, text="Company page check finished.")
+    progress.progress(1.0, text=f"Company page checks {homepage_cap:,}/{homepage_cap:,} (100.0%) - complete")
     st.session_state["last_action"] = {
         "message": homepage_result.message,
         "level": "success",
@@ -2414,23 +2452,25 @@ if st.session_state.pop("check_company_pages_requested", False):
 if st.session_state.pop("start_paid_run_requested", False):
     cap = int(prospect_cap)
     active_verify_mode = st.session_state.get("active_verify_mode", verify_mode)
-    progress = st.progress(0, text=f"Refreshing company type labels before running up to {cap:,} companies...")
+    run_started_at = time.perf_counter()
+    progress = st.progress(0, text=f"Preparing run 0/{cap:,} (0.0%) - ETA calculating")
     preview = st.empty()
     classify_result = run_deterministic_classification(conn)
-    progress.progress(0.05, text="Starting web search for companies that still need it...")
+    enrichment_started_at = time.perf_counter()
+    progress.progress(0.05, text="Web search 0/0 (0.0%) - ETA calculating")
 
     def enrichment_progress(index, total, result, counts):
         if total:
             progress.progress(
                 min(0.5, (index / total) * 0.5),
-                text=f"Web search {index:,}/{total:,}: {result.get('company_name', '')}",
+                text=_progress_status("Web search", index, total, enrichment_started_at, _clean_ui_text(result.get("company_name", ""))),
             )
 
     def scoring_progress(index, total, result, counts):
         if total:
             progress.progress(
                 min(1.0, 0.5 + (index / total) * 0.5),
-                text=f"Prospect scoring {index:,}/{total:,}: {result.get('company_name', '')}",
+                text=_progress_status("OpenAI scoring", index, total, scoring_started_at, _clean_ui_text(result.get("company_name", ""))),
             )
         if total and index < total and index % 5 != 0:
             return
@@ -2453,6 +2493,7 @@ if st.session_state.pop("start_paid_run_requested", False):
         progress_callback=enrichment_progress,
         mode=active_verify_mode,
     )
+    scoring_started_at = time.perf_counter()
     score_result = score_enriched_candidates(
         conn,
         runtime_settings,
@@ -2461,7 +2502,7 @@ if st.session_state.pop("start_paid_run_requested", False):
         progress_callback=scoring_progress,
         mode=active_verify_mode,
     )
-    progress.progress(1.0, text="Verification run finished.")
+    progress.progress(1.0, text=f"Search and scoring complete - elapsed {_format_live_duration(time.perf_counter() - run_started_at)}")
     level = "warning" if enrich_result.counts.get("errors") or score_result.counts.get("errors") else "success"
     run_openai_estimate = float(score_result.counts.get("estimated_cost_usd") or 0)
     run_tavily_credits = int(enrich_result.counts.get("tavily_credits_used") or enrich_result.counts.get("tavily_calls") or 0)
