@@ -486,6 +486,18 @@ CUSTOM_CSS = """
   .stRadio input[type="radio"] {
     accent-color: var(--wv-accent) !important;
   }
+  .stRadio [data-baseweb="radio"] div,
+  .stRadio [role="radio"] div,
+  .stRadio [aria-checked="true"] div {
+    border-color: var(--wv-accent) !important;
+  }
+  .stRadio [data-baseweb="radio"] div div,
+  .stRadio [role="radio"][aria-checked="true"] div div,
+  .stRadio svg {
+    background-color: var(--wv-accent) !important;
+    color: var(--wv-accent) !important;
+    fill: var(--wv-accent) !important;
+  }
   .stRadio svg {
     color: var(--wv-accent) !important;
     fill: var(--wv-accent) !important;
@@ -1907,6 +1919,7 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> 
     tavily_calls_avoided = int(homepage_summary.get("score_from_homepage", 0))
     estimated_tavily_credits_saved = tavily_calls_avoided
     estimated_tavily_cost_saved = tavily_calls_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0)
+    projected_tavily_usage_estimate = projected_tavily_calls * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0)
     projected_total = projected_tavily_bill + projected_openai_estimate
 
     tavily_workers = max(1, min(_setting_int(settings, "tavily_concurrency", 12), max(1, projected_tavily_calls)))
@@ -1944,6 +1957,7 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> 
         "projected_completion_tokens": projected_completion_tokens,
         "projected_openai_estimate": projected_openai_estimate,
         "projected_tavily_bill": projected_tavily_bill,
+        "projected_tavily_usage_estimate": projected_tavily_usage_estimate,
         "projected_tavily_overage": projected_tavily_overage,
         "projected_tavily_payg_if_enabled": projected_tavily_payg_if_enabled,
         "projected_total": projected_total,
@@ -2836,31 +2850,31 @@ elif slide["key"] == "homepage":
         )
 elif slide["key"] == "search":
     if pending_verify_run:
-        prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
         pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode)
         pending_mode = pending_verify_run.get("mode", verify_mode)
         homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
+        projected_tavily_calls = int(pending_verify_run["projected_tavily_calls"])
         _render_phase_panel(
             "before",
             "Web search setup",
             "Only companies that still need more data are sent to Tavily.",
             [
-                ("Companies in this run", _format_int(pending_verify_run["cap"])),
+                ("Companies needing web search", _format_int(projected_tavily_calls)),
                 ("Can skip Tavily", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
-                ("Need Tavily web search", _format_int(pending_verify_run["projected_tavily_calls"])),
-                ("Estimated Tavily billed cost", _format_currency(pending_verify_run["projected_tavily_bill"])),
-                ("Estimated web-search time", _format_duration(int((pending_verify_run["projected_tavily_calls"] / max(1, pending_verify_run["tavily_workers"])) * 3.0))),
+                ("Estimated Tavily usage cost", _format_currency(pending_verify_run["projected_tavily_usage_estimate"])),
+                ("Estimated billed overage now", _format_currency(pending_verify_run["projected_tavily_bill"])),
+                ("Estimated web-search time", _format_duration(int((projected_tavily_calls / max(1, pending_verify_run["tavily_workers"])) * 3.0))),
             ],
         )
         if homepage_checked <= 0:
             st.warning("Check company pages before running web search.")
-        elif int(pending_verify_run["projected_tavily_calls"]) > 0:
+        elif projected_tavily_calls > 0:
             if st.button("Run web search", type="primary", use_container_width=True, key="start_web_search_inline"):
                 st.session_state["active_verify_mode"] = pending_mode
                 st.session_state["start_web_search_requested"] = True
                 st.rerun()
 
-        if homepage_checked > 0 and int(pending_verify_run["projected_tavily_calls"]) <= 0:
+        if homepage_checked > 0 and projected_tavily_calls <= 0:
             _render_phase_panel(
                 "after",
                 "Web-search data is ready",
@@ -2881,7 +2895,6 @@ elif slide["key"] == "search":
         st.warning("Load the Manifest list before estimating web search.")
 elif slide["key"] == "score":
     if pending_verify_run:
-        prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
         pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode)
         pending_mode = pending_verify_run.get("mode", verify_mode)
         scoreable_count = len(db.enriched_for_openai_scoring(conn, limit=int(prospect_cap), force=False, mode=verify_mode))

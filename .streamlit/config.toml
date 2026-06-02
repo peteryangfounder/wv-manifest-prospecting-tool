@@ -3,3 +3,6 @@ gatherUsageStats = false
 
 [server]
 headless = true
+
+[theme]
+primaryColor = "#1f6f5b"
