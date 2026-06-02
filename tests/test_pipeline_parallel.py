@@ -153,3 +153,49 @@ def test_score_enriched_candidates_persists_parallel_results(monkeypatch, tmp_pa
     assert result.counts["prompt_tokens"] == 300
     assert result.counts["completion_tokens"] == 60
     assert metrics["openai_scored"] == 3
+
+
+def test_provider_retry_handles_429_then_success(monkeypatch, tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    calls = {"count": 0}
+    sleeps: list[float] = []
+
+    class RateLimitError(RuntimeError):
+        status_code = 429
+
+    def flaky_call():
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise RateLimitError("rate limited")
+        return "ok"
+
+    monkeypatch.setattr(pipeline.time, "sleep", lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr(pipeline.random, "uniform", lambda _start, _end: 0)
+
+    value, attempts, retries = pipeline._call_provider_with_retries(settings, flaky_call)
+
+    assert value == "ok"
+    assert attempts == 3
+    assert retries == 2
+    assert sleeps == [1.0, 2.0]
+
+
+def test_provider_retry_preserves_attempt_count_on_exhaustion(monkeypatch, tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+
+    class ServerError(RuntimeError):
+        status_code = 503
+
+    monkeypatch.setattr(pipeline.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(pipeline.random, "uniform", lambda _start, _end: 0)
+    monkeypatch.setattr(pipeline, "classify_with_openai", lambda *_args, **_kwargs: (_ for _ in ()).throw(ServerError("down")))
+
+    result = pipeline._score_company_with_openai(
+        settings,
+        {"id": 1, "canonical_name": "Alpha AI", "deterministic_type": "likely_startup_or_tech"},
+    )
+
+    assert result["api_call"] == 1
+    assert result["provider_attempts"] == settings.provider_max_retries + 1
+    assert result["retry_attempts"] == settings.provider_max_retries
+    assert result["error_count"] == 1

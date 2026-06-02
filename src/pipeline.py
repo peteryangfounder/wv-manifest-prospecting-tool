@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import random
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,6 +23,14 @@ class PipelineResult:
     stage: str
     message: str
     counts: dict[str, Any]
+
+
+class ProviderCallFailed(RuntimeError):
+    def __init__(self, original: Exception, attempts: int, retries: int):
+        super().__init__(str(original))
+        self.original = original
+        self.attempts = attempts
+        self.retries = retries
 
 
 def _estimate_openai_cost(settings: Settings, prompt_tokens: int, completion_tokens: int) -> float:
@@ -49,6 +59,58 @@ def _bounded_worker_count(settings: Settings, name: str, default: int, item_coun
 
 def _commit_interval(settings: Settings) -> int:
     return max(1, _setting_int(settings, "db_commit_batch_size", 25))
+
+
+def _retryable_status_codes() -> set[int]:
+    return {408, 409, 425, 429, 500, 502, 503, 504}
+
+
+def _status_code_from_exception(exc: Exception) -> int | None:
+    status_code = getattr(exc, "status_code", None)
+    if status_code is not None:
+        return int(status_code)
+    response = getattr(exc, "response", None)
+    if response is not None and getattr(response, "status_code", None) is not None:
+        return int(response.status_code)
+    return None
+
+
+def _retry_after_from_exception(exc: Exception) -> float | None:
+    headers = getattr(exc, "headers", None)
+    response = getattr(exc, "response", None)
+    if not headers and response is not None:
+        headers = getattr(response, "headers", None)
+    if not headers:
+        return None
+    retry_after = headers.get("retry-after") or headers.get("Retry-After")
+    if retry_after is None:
+        return None
+    try:
+        return max(0.0, float(retry_after))
+    except (TypeError, ValueError):
+        return None
+
+
+def _call_provider_with_retries(settings: Settings, func) -> tuple[Any, int, int]:
+    max_retries = max(0, _setting_int(settings, "provider_max_retries", 4))
+    initial = max(0.1, float(_setting(settings, "provider_backoff_initial_seconds", 1.0)))
+    maximum = max(initial, float(_setting(settings, "provider_backoff_max_seconds", 20.0)))
+    attempts = 0
+    retries = 0
+    while True:
+        attempts += 1
+        try:
+            return func(), attempts, retries
+        except Exception as exc:
+            status_code = _status_code_from_exception(exc)
+            retryable = status_code in _retryable_status_codes() or status_code is None
+            if not retryable or retries >= max_retries:
+                raise ProviderCallFailed(exc, attempts, retries) from exc
+            retry_after = _retry_after_from_exception(exc)
+            delay = retry_after if retry_after is not None else min(maximum, initial * (2**retries))
+            delay += random.uniform(0, min(1.0, delay * 0.25))
+            retries += 1
+            time.sleep(delay)
 
 
 def load_attendees(conn, settings: Settings) -> PipelineResult:
@@ -142,6 +204,8 @@ def enrich_candidates(
     enriched = 0
     errors = 0
     cache_hits = 0
+    retry_attempts = 0
+    provider_attempts = 0
     workers = _bounded_worker_count(settings, "tavily_concurrency", 12, len(companies))
     commit_interval = _commit_interval(settings)
 
@@ -156,6 +220,8 @@ def enrich_candidates(
             enriched += result["enriched"]
             errors += result["error_count"]
             cache_hits += result["cache_hit"]
+            retry_attempts += result.get("retry_attempts", 0)
+            provider_attempts += result.get("provider_attempts", result["api_call"])
             if index % commit_interval == 0:
                 conn.commit()
             if progress_callback:
@@ -163,7 +229,13 @@ def enrich_candidates(
                     index,
                     len(companies),
                     result,
-                    {"tavily_calls": calls, "enriched": enriched, "errors": errors, "cache_hits": cache_hits},
+                    {
+                        "tavily_calls": calls,
+                        "enriched": enriched,
+                        "errors": errors,
+                        "cache_hits": cache_hits,
+                        "retry_attempts": retry_attempts,
+                    },
                 )
     conn.commit()
 
@@ -182,7 +254,7 @@ def enrich_candidates(
         tavily_calls=calls,
         cache_hits=cache_hits,
         estimated_cost_usd=0.0,
-        notes=f"Errors: {errors}. Force refresh: {force}.",
+        notes=f"Errors: {errors}. Retries: {retry_attempts}. Force refresh: {force}.",
     )
     return PipelineResult(
         "tavily_enrichment",
@@ -199,6 +271,8 @@ def enrich_candidates(
             "enriched": enriched,
             "errors": errors,
             "cache_hits": cache_hits,
+            "provider_attempts": provider_attempts,
+            "retry_attempts": retry_attempts,
             "parallel_workers": workers,
             "estimated_cost_usd": 0.0,
         },
@@ -231,6 +305,8 @@ def score_enriched_candidates(
     completion_tokens = 0
     total_tokens = 0
     estimated_cost_usd = 0.0
+    retry_attempts = 0
+    provider_attempts = 0
     workers = _bounded_worker_count(settings, "openai_concurrency", 6, len(companies))
     commit_interval = _commit_interval(settings)
 
@@ -251,6 +327,8 @@ def score_enriched_candidates(
             completion_tokens += result.get("completion_tokens", 0)
             total_tokens += result.get("total_tokens", 0)
             estimated_cost_usd += result.get("estimated_cost_usd", 0.0)
+            retry_attempts += result.get("retry_attempts", 0)
+            provider_attempts += result.get("provider_attempts", result["api_call"])
             if index % commit_interval == 0:
                 conn.commit()
             if progress_callback:
@@ -267,6 +345,7 @@ def score_enriched_candidates(
                         "completion_tokens": completion_tokens,
                         "total_tokens": total_tokens,
                         "estimated_cost_usd": estimated_cost_usd,
+                        "retry_attempts": retry_attempts,
                     },
                 )
     conn.commit()
@@ -281,7 +360,7 @@ def score_enriched_candidates(
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
         estimated_cost_usd=estimated_cost_usd,
-        notes=f"Errors: {errors}. Force refresh: {force}. Model: {settings.openai_model}.",
+        notes=f"Errors: {errors}. Retries: {retry_attempts}. Force refresh: {force}. Model: {settings.openai_model}.",
     )
     return PipelineResult(
         "openai_scoring",
@@ -294,6 +373,8 @@ def score_enriched_candidates(
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
+            "provider_attempts": provider_attempts,
+            "retry_attempts": retry_attempts,
             "parallel_workers": workers,
             "estimated_cost_usd": estimated_cost_usd,
         },
@@ -303,10 +384,15 @@ def score_enriched_candidates(
 def _fetch_enrichment_for_company(settings: Settings, company: dict[str, Any]) -> dict[str, Any]:
     try:
         client = TavilyClient(settings.tavily_api_key, settings.tavily_max_results)
-        payload = client.search(company["canonical_name"])
+        payload, attempts, retries = _call_provider_with_retries(
+            settings,
+            lambda: client.search(company["canonical_name"]),
+        )
         enrichment = compact_tavily_response(company["id"], payload)
         return {
             "api_call": 1,
+            "provider_attempts": attempts,
+            "retry_attempts": retries,
             "cache_hit": 0,
             "enriched": 1 if enrichment["status"] == "success" else 0,
             "error_count": 0 if enrichment["status"] == "success" else 1,
@@ -317,8 +403,14 @@ def _fetch_enrichment_for_company(settings: Settings, company: dict[str, Any]) -
     except EnrichmentUnavailable:
         raise
     except Exception as exc:  # noqa: BLE001 - persist provider failure per company.
+        original = exc.original if isinstance(exc, ProviderCallFailed) else exc
+        status_code = _status_code_from_exception(original)
+        attempts = exc.attempts if isinstance(exc, ProviderCallFailed) else 1
+        retries = exc.retries if isinstance(exc, ProviderCallFailed) else 0
         return {
             "api_call": 1,
+            "provider_attempts": attempts,
+            "retry_attempts": retries,
             "cache_hit": 0,
             "enriched": 0,
             "error_count": 1,
@@ -334,14 +426,17 @@ def _fetch_enrichment_for_company(settings: Settings, company: dict[str, Any]) -
                 "top_snippets": [],
                 "website": None,
                 "status": "error",
-                "error": str(exc),
+                "error": f"status={status_code or 'unknown'} {str(original)[:180]}",
             },
         }
 
 
 def _score_company_with_openai(settings: Settings, company: dict[str, Any]) -> dict[str, Any]:
     try:
-        score = classify_with_openai(company, settings.openai_api_key or "", settings.openai_model)
+        score, attempts, retries = _call_provider_with_retries(
+            settings,
+            lambda: classify_with_openai(company, settings.openai_api_key or "", settings.openai_model),
+        )
         usage = (score.get("raw_json") or {}).get("usage") or {}
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
         completion_tokens = int(usage.get("completion_tokens") or 0)
@@ -350,6 +445,8 @@ def _score_company_with_openai(settings: Settings, company: dict[str, Any]) -> d
         score["raw_json"]["estimated_cost_usd"] = estimated_cost_usd
         return {
             "api_call": 1,
+            "provider_attempts": attempts,
+            "retry_attempts": retries,
             "cache_hit": 0,
             "scored": 1,
             "error_count": 0,
@@ -364,10 +461,16 @@ def _score_company_with_openai(settings: Settings, company: dict[str, Any]) -> d
             "estimated_cost_usd": estimated_cost_usd,
         }
     except Exception as exc:  # noqa: BLE001 - keep partial scoring runs usable.
+        original = exc.original if isinstance(exc, ProviderCallFailed) else exc
+        status_code = _status_code_from_exception(original)
+        attempts = exc.attempts if isinstance(exc, ProviderCallFailed) else 1
+        retries = exc.retries if isinstance(exc, ProviderCallFailed) else 0
         fallback = baseline_score(company)
-        fallback["rationale"] = f"OpenAI scoring failed. Baseline retained. Error: {str(exc)[:120]}"
+        fallback["rationale"] = f"OpenAI scoring failed. Baseline retained. status={status_code or 'unknown'}."
         return {
             "api_call": 1,
+            "provider_attempts": attempts,
+            "retry_attempts": retries,
             "cache_hit": 0,
             "scored": 0,
             "error_count": 1,

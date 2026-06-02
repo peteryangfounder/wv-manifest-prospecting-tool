@@ -51,6 +51,9 @@ MAX_SCORE=75
 TAVILY_CONCURRENCY=12
 OPENAI_CONCURRENCY=6
 DB_COMMIT_BATCH_SIZE=25
+PROVIDER_MAX_RETRIES=4
+PROVIDER_BACKOFF_INITIAL_SECONDS=1.0
+PROVIDER_BACKOFF_MAX_SECONDS=20.0
 TAVILY_MAX_RESULTS=3
 DATABASE_PATH=data/prospects.db
 OPENAI_INPUT_COST_PER_1M_TOKENS=0.15
@@ -110,6 +113,10 @@ python scripts/run_pipeline.py --score --max-score 25
 `src/db.py` stores companies, enrichments, scores, and run metadata. The dashboard uses that run metadata for API-call counts, tokens, cache hits, and estimated spend.
 
 The enrichment and scoring stages run provider requests concurrently while keeping SQLite writes on the main thread. `TAVILY_CONCURRENCY` and `OPENAI_CONCURRENCY` control the number of simultaneous provider requests. They improve throughput but do not change the number of provider calls; the dashboard batch size and cache reuse remain the primary cost controls. `DB_COMMIT_BATCH_SIZE` controls how often completed results are committed during a run.
+
+Before a verification run starts, the dashboard shows a confirmation step with projected uncached Tavily calls, projected OpenAI scoring calls, estimated token usage, estimated provider cost, and approximate runtime. No Tavily or OpenAI provider calls are made until the user confirms that estimate.
+
+Provider calls use bounded retries with exponential backoff and jitter for transient errors such as rate limits and 5xx responses. `PROVIDER_MAX_RETRIES`, `PROVIDER_BACKOFF_INITIAL_SECONDS`, and `PROVIDER_BACKOFF_MAX_SECONDS` control that behavior. Non-retryable provider failures are recorded per company so a single bad row does not stop the full batch.
 
 ## Billing And Usage Tracking
 

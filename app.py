@@ -1111,6 +1111,78 @@ def _tavily_billing_from_metrics(metrics: dict, settings) -> TavilyBillingSummar
     )
 
 
+def _estimate_verify_run(conn, metrics: dict, settings, cap: int) -> dict:
+    tavily_candidates = db.candidates_for_enrichment(conn, limit=cap, force=False, high_priority_only=True)
+    currently_scoreable = db.enriched_for_openai_scoring(conn, limit=cap, force=False, high_priority_only=True)
+    projected_tavily_calls = len(tavily_candidates)
+    projected_openai_calls = min(cap, len(currently_scoreable) + projected_tavily_calls)
+
+    totals = metrics.get("run_totals") or {}
+    historical_openai_calls = max(1, int(totals.get("openai_calls") or 0))
+    avg_prompt_tokens = int(totals.get("prompt_tokens") or 0) / historical_openai_calls
+    avg_completion_tokens = int(totals.get("completion_tokens") or 0) / historical_openai_calls
+    if int(totals.get("openai_calls") or 0) <= 0:
+        avg_prompt_tokens = 1_000
+        avg_completion_tokens = 250
+
+    projected_prompt_tokens = int(projected_openai_calls * avg_prompt_tokens)
+    projected_completion_tokens = int(projected_openai_calls * avg_completion_tokens)
+    projected_openai_estimate = (
+        (projected_prompt_tokens / 1_000_000) * float(settings.openai_input_cost_per_1m_tokens or 0)
+        + (projected_completion_tokens / 1_000_000) * float(settings.openai_output_cost_per_1m_tokens or 0)
+    )
+
+    existing_tavily_credits = int(totals.get("tavily_calls") or 0)
+    tavily_before = calculate_tavily_billing(
+        credits_used=existing_tavily_credits,
+        included_monthly_credits=_setting(settings, "tavily_included_monthly_credits", 1000),
+        pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", False),
+        payg_price_per_credit_usd=_setting(settings, "tavily_payg_price_per_credit_usd", 0.008),
+        plan_name=_setting(settings, "tavily_plan_name", "Researcher"),
+        shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.001),
+    )
+    tavily_after = calculate_tavily_billing(
+        credits_used=existing_tavily_credits + projected_tavily_calls,
+        included_monthly_credits=_setting(settings, "tavily_included_monthly_credits", 1000),
+        pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", False),
+        payg_price_per_credit_usd=_setting(settings, "tavily_payg_price_per_credit_usd", 0.008),
+        plan_name=_setting(settings, "tavily_plan_name", "Researcher"),
+        shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.001),
+    )
+    projected_tavily_bill = max(0.0, tavily_after.actual_billed_usd - tavily_before.actual_billed_usd)
+    projected_total = projected_tavily_bill + projected_openai_estimate
+
+    tavily_workers = max(1, min(_setting_int(settings, "tavily_concurrency", 12), max(1, projected_tavily_calls)))
+    openai_workers = max(1, min(_setting_int(settings, "openai_concurrency", 6), max(1, projected_openai_calls)))
+    tavily_seconds = projected_tavily_calls / tavily_workers * 3.0 if projected_tavily_calls else 0.0
+    openai_seconds = projected_openai_calls / openai_workers * 4.0 if projected_openai_calls else 0.0
+    estimated_seconds = int(tavily_seconds + openai_seconds)
+
+    return {
+        "cap": cap,
+        "projected_tavily_calls": projected_tavily_calls,
+        "projected_openai_calls": projected_openai_calls,
+        "projected_prompt_tokens": projected_prompt_tokens,
+        "projected_completion_tokens": projected_completion_tokens,
+        "projected_openai_estimate": projected_openai_estimate,
+        "projected_tavily_bill": projected_tavily_bill,
+        "projected_total": projected_total,
+        "tavily_credits_after": tavily_after.credits_used,
+        "tavily_free_credits_remaining_after": tavily_after.free_credits_remaining,
+        "tavily_payg_enabled": tavily_after.pay_as_you_go_enabled,
+        "estimated_seconds": estimated_seconds,
+        "tavily_workers": tavily_workers,
+        "openai_workers": openai_workers,
+    }
+
+
+def _format_duration(seconds: int) -> str:
+    if seconds <= 0:
+        return "under 1 minute"
+    minutes = max(1, round(seconds / 60))
+    return f"about {minutes} minute" if minutes == 1 else f"about {minutes} minutes"
+
+
 def _score_band_frame(frame: pd.DataFrame) -> pd.DataFrame:
     labels = ["0-19", "20-39", "40-59", "60-79", "80-100"]
     if frame.empty:
@@ -1560,7 +1632,8 @@ if st.button(primary_label, type="primary", use_container_width=True):
     if workflow_stage == 1:
         run_step = "source"
     else:
-        run_step = "verify"
+        st.session_state["pending_verify_run"] = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap))
+        run_step = "confirm_verify"
 else:
     run_step = None
 
@@ -1573,6 +1646,44 @@ if run_step == "source":
     }
     frame, metrics = _load_frame_and_metrics(conn)
     st.rerun()
+
+pending_verify_run = st.session_state.get("pending_verify_run")
+if pending_verify_run and run_step != "source":
+    st.markdown("<div class='section-label'>Confirm API run</div>", unsafe_allow_html=True)
+    _render_summary_card(
+        "Projected usage before starting",
+        [
+            ("Batch cap", _format_int(pending_verify_run["cap"])),
+            ("Uncached Tavily calls", _format_int(pending_verify_run["projected_tavily_calls"])),
+            ("Projected OpenAI scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
+            ("Projected input tokens", _format_int(pending_verify_run["projected_prompt_tokens"])),
+            ("Projected output tokens", _format_int(pending_verify_run["projected_completion_tokens"])),
+            ("Estimated OpenAI token-rate cost", _format_currency(pending_verify_run["projected_openai_estimate"])),
+            ("Estimated Tavily billed cost", _format_currency(pending_verify_run["projected_tavily_bill"])),
+            ("Estimated total provider cost", _format_currency(pending_verify_run["projected_total"])),
+            ("Estimated run time", _format_duration(int(pending_verify_run["estimated_seconds"]))),
+            (
+                "Parallel workers",
+                f"{pending_verify_run['tavily_workers']} search, {pending_verify_run['openai_workers']} scoring",
+            ),
+            (
+                "Tavily credits after run",
+                f"{_format_int(pending_verify_run['tavily_credits_after'])} used, {_format_int(pending_verify_run['tavily_free_credits_remaining_after'])} included credits remaining",
+            ),
+            ("Tavily pay-as-you-go", "on" if pending_verify_run["tavily_payg_enabled"] else "off"),
+        ],
+    )
+    st.caption(
+        "OpenAI cost is an internal token-rate estimate based on the selected model and recent usage. "
+        "Actual OpenAI billing may differ. No Tavily or OpenAI provider calls start until you confirm."
+    )
+    confirm_cols = st.columns((1, 1))
+    if confirm_cols[0].button("Confirm and start API run", type="primary", use_container_width=True):
+        run_step = "verify"
+        st.session_state.pop("pending_verify_run", None)
+    if confirm_cols[1].button("Cancel API run", use_container_width=True):
+        st.session_state.pop("pending_verify_run", None)
+        st.rerun()
 
 if run_step == "verify":
     cap = int(prospect_cap)

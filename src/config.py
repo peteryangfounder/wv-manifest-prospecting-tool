@@ -79,6 +79,9 @@ class Settings:
     tavily_concurrency: int = 12
     openai_concurrency: int = 6
     db_commit_batch_size: int = 25
+    provider_max_retries: int = 4
+    provider_backoff_initial_seconds: float = 1.0
+    provider_backoff_max_seconds: float = 20.0
     tavily_plan_name: str = "Researcher"
     tavily_included_monthly_credits: int = 1000
     tavily_pay_as_you_go_enabled: bool = False
@@ -103,6 +106,9 @@ def get_settings() -> Settings:
         tavily_concurrency=_env_int("TAVILY_CONCURRENCY", 12),
         openai_concurrency=_env_int("OPENAI_CONCURRENCY", 6),
         db_commit_batch_size=_env_int("DB_COMMIT_BATCH_SIZE", 25),
+        provider_max_retries=_env_int("PROVIDER_MAX_RETRIES", 4),
+        provider_backoff_initial_seconds=_env_float("PROVIDER_BACKOFF_INITIAL_SECONDS", 1.0),
+        provider_backoff_max_seconds=_env_float("PROVIDER_BACKOFF_MAX_SECONDS", 20.0),
         tavily_max_results=_env_int("TAVILY_MAX_RESULTS", 3),
         openai_input_cost_per_1m_tokens=_env_float("OPENAI_INPUT_COST_PER_1M_TOKENS", 0.15),
         openai_output_cost_per_1m_tokens=_env_float("OPENAI_OUTPUT_COST_PER_1M_TOKENS", 0.60),
