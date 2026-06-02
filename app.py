@@ -2680,7 +2680,7 @@ slide = slides[slide_index]
 
 st.markdown(
     """
-    <form class="global-cache-form" method="get" title="Clears company rows, company-page data, Tavily Search API results, and OpenAI API scores. Keeps run history and API cost records.">
+    <form class="global-cache-form" method="get" title="Clears company rows, company-page data, Tavily Search API results, and OpenAI API scores. Keeps internal run records for cost calculations.">
       <input type="hidden" name="clear_processing_cache" value="1" />
       <button class="global-cache-button" type="submit">Clear cache</button>
     </form>
@@ -2982,19 +2982,6 @@ elif slide["key"] == "cost":
         last_api_calls=last_api_calls,
         last_run_local_openai_estimate=last_run_local_openai_estimate,
         model_name=str(runtime_settings.openai_model),
-    )
-    _render_stage_table(
-        "API run history kept for billing records",
-        "This table is not cleared by the processing-cache button. It keeps the local record of Tavily Search API calls, OpenAI API calls, tokens, and estimated OpenAI token cost.",
-        cost_stage_table,
-        [
-            ("run_type_display", "Run type", "text"),
-            ("tavily_calls", "Tavily Search API calls", "number"),
-            ("openai_calls", "OpenAI API calls", "number"),
-            ("total_tokens", "OpenAI API tokens", "number"),
-            ("estimated_cost_usd", "Estimated OpenAI token cost", "currency"),
-        ],
-        "No API run history recorded yet.",
     )
 elif slide["key"] == "prospects":
     footer_action_label = "Next"
