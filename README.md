@@ -56,6 +56,9 @@ DB_COMMIT_BATCH_SIZE=25
 PROVIDER_MAX_RETRIES=4
 PROVIDER_BACKOFF_INITIAL_SECONDS=1.0
 PROVIDER_BACKOFF_MAX_SECONDS=20.0
+HOMEPAGE_EVIDENCE_MAX_PER_RUN=100
+HOMEPAGE_FETCH_TIMEOUT_SECONDS=4.0
+HOMEPAGE_FETCH_MAX_BYTES=200000
 TAVILY_MAX_RESULTS=3
 DATABASE_PATH=data/prospects.db
 OPENAI_INPUT_COST_PER_1M_TOKENS=0.15
@@ -110,7 +113,9 @@ python scripts/run_pipeline.py --score --max-score 25
 
 `src/rules.py` applies cheap classification before any paid API call. It filters obvious non-targets such as large incumbents, investors, associations, universities, consultancies, generic placeholders, and logistics service providers without software or platform signals. It also creates a high-priority enrichment queue so paid provider calls start with the rows most likely to produce investor-relevant prospects.
 
-`src/enrich.py` calls Tavily with a compact company-search query and stores titles, URLs, snippets, website hints, and raw JSON in SQLite.
+`src/domain_resolver.py`, `src/web_metadata.py`, `src/homepage_evidence.py`, and `src/evidence_routing.py` implement the first cheap evidence layer before paid search. The app generates conservative domain guesses, fetches bounded homepage metadata, extracts titles, meta descriptions, OpenGraph fields, JSON-LD organization data, headings, and compact text snippets, then routes each candidate as homepage score-ready, Tavily-needed, low-priority data gap, or soft-excluded.
+
+`src/enrich.py` calls Tavily with a compact company-search query when homepage evidence is insufficient, ambiguous, unresolved, or missing. It stores titles, URLs, snippets, website hints, and raw JSON in SQLite.
 
 `src/classify.py` sends compact evidence to OpenAI. The model returns structured JSON with company type, startup signal, sector tags, Wittington edge, score components, confidence, rationale, and evidence summary.
 
@@ -118,7 +123,9 @@ python scripts/run_pipeline.py --score --max-score 25
 
 The enrichment and scoring stages run provider requests concurrently while keeping SQLite writes on the main thread. `TAVILY_CONCURRENCY` and `OPENAI_CONCURRENCY` control the number of simultaneous provider requests. This turns the slowest parts of the workflow from one-company-at-a-time waiting into parallel I/O while preserving deterministic database writes. The worker counts improve throughput but do not change the number of provider calls; the dashboard batch size, high-priority queue, and cache reuse remain the primary cost controls. `DB_COMMIT_BATCH_SIZE` controls how often completed results are committed during a run.
 
-Before a verification run starts, the dashboard shows a confirmation step with projected uncached Tavily calls, projected OpenAI scoring calls, estimated token usage, estimated provider cost, and approximate runtime. No Tavily or OpenAI provider calls are made until the user confirms that estimate.
+The bounded homepage evidence pass runs before Tavily. `HOMEPAGE_EVIDENCE_MAX_PER_RUN` caps how many companies receive this near-free metadata check in one Streamlit run. `HOMEPAGE_FETCH_TIMEOUT_SECONDS` and `HOMEPAGE_FETCH_MAX_BYTES` keep network calls bounded. Homepage evidence that is strong enough creates a cached `homepage` enrichment record so OpenAI can score compact homepage evidence without a Tavily call. Weak, missing, or contradictory homepage evidence routes the company to Tavily instead of excluding it.
+
+Before a verification run starts, the dashboard shows a confirmation step with the selected mode, API-eligible universe, domain-discovery candidates, cached resolved domains, homepage evidence-ready companies, Tavily-needed companies, Tavily calls skipped because homepage evidence is sufficient, homepage data gaps, projected uncached Tavily calls, projected OpenAI scoring calls, estimated token usage, estimated provider cost, and approximate runtime. No Tavily or OpenAI provider calls are made until the user confirms that estimate.
 
 Provider calls use bounded retries with exponential backoff and jitter for transient errors such as 408, 409, 425, 429, and 5xx responses. When a provider includes `Retry-After`, the app uses it. `PROVIDER_MAX_RETRIES`, `PROVIDER_BACKOFF_INITIAL_SECONDS`, and `PROVIDER_BACKOFF_MAX_SECONDS` control that behavior. Non-retryable provider failures are recorded per company so a single bad row does not stop the full batch.
 
@@ -158,11 +165,13 @@ At the current configured prices, a broad pass over all 2,444 API-eligible candi
 
 Verification modes make the precision/recall tradeoff explicit:
 
-- **Precision-first** limits the paid queue to likely startup or technology rows. This is lower noise and lower cost, but it has higher false-negative risk.
+- **Precision-first** limits the paid queue to likely startup or technology rows, while still allowing ambiguous rows back in when cached homepage evidence is strong enough to make them score-ready. This is lower noise and lower cost, but it still has higher false-negative risk than broad recall mode.
 - **Balanced** is the default. It runs high-signal and likely-technology rows first, then adds ambiguous candidates within the approved cap.
-- **Recall-first** is for broad audits and larger approved runs. In the current implementation it uses the broad candidate universe; the next version should add homepage/domain evidence before the Tavily step.
+- **Recall-first** is for broad audits and larger approved runs. It uses the broad candidate universe and escalates more unresolved or uncertain companies through the homepage-to-Tavily evidence cascade.
 
-The next recommended architecture is a staged evidence cascade: deterministic exclusions, domain discovery, homepage metadata extraction, local semantic triage, budget-aware Tavily Basic Search, evidence-gated OpenAI scoring, ranking, and false-negative audits. That avoids both bad extremes: name-keyword filtering only, and blindly spending paid APIs on every raw row.
+The current architecture is a staged evidence cascade: deterministic exclusions, domain discovery, homepage metadata extraction, local semantic triage, budget-aware Tavily Basic Search, evidence-gated OpenAI scoring, ranking, and false-negative audits. That avoids both bad extremes: name-keyword filtering only, and blindly spending paid APIs on every raw row.
+
+The current implementation includes the first bounded version of that cascade. It is intentionally not a broad crawler: it starts with homepage metadata only, caches results, uses conservative domain confidence, and treats network failures as data gaps rather than exclusions. The next extension should add bounded `/about`, `/product`, `/platform`, and `/solutions` fetches after the homepage-only layer is measured.
 
 ## Billing And Usage Tracking
 
@@ -203,7 +212,7 @@ The app is designed to scale from a small demo batch to thousands of attendee ro
 - SQLite writes are serialized and batched to avoid thread contention.
 - Transient provider failures use bounded retry/backoff with jitter.
 - Terminal provider failures fall back to recorded error state or baseline score instead of stopping the run.
-- The confirmation step estimates uncached calls, model tokens, OpenAI token-rate cost, Tavily billed cost, total provider cost, worker counts, credits after the run, and approximate runtime before provider calls start.
+- The confirmation step estimates cheap homepage/domain checks, cached homepage routing outcomes, uncached calls, model tokens, OpenAI token-rate cost, Tavily billed cost, total provider cost, worker counts, credits after the run, and approximate runtime before provider calls start.
 - Broad recall runs can include ambiguous companies after high-signal rows; the confirmation card shows the candidate mix before execution.
 - Live billing reads through `OPENAI_ADMIN_KEY` are administrative reads and are not counted as model/token spend.
 

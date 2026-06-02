@@ -82,6 +82,9 @@ class Settings:
     provider_max_retries: int = 4
     provider_backoff_initial_seconds: float = 1.0
     provider_backoff_max_seconds: float = 20.0
+    homepage_evidence_max_per_run: int = 100
+    homepage_fetch_timeout_seconds: float = 4.0
+    homepage_fetch_max_bytes: int = 200_000
     tavily_plan_name: str = "Researcher"
     tavily_included_monthly_credits: int = 1000
     tavily_pay_as_you_go_enabled: bool = False
@@ -109,6 +112,9 @@ def get_settings() -> Settings:
         provider_max_retries=_env_int("PROVIDER_MAX_RETRIES", 4),
         provider_backoff_initial_seconds=_env_float("PROVIDER_BACKOFF_INITIAL_SECONDS", 1.0),
         provider_backoff_max_seconds=_env_float("PROVIDER_BACKOFF_MAX_SECONDS", 20.0),
+        homepage_evidence_max_per_run=_env_int("HOMEPAGE_EVIDENCE_MAX_PER_RUN", 100),
+        homepage_fetch_timeout_seconds=_env_float("HOMEPAGE_FETCH_TIMEOUT_SECONDS", 4.0),
+        homepage_fetch_max_bytes=_env_int("HOMEPAGE_FETCH_MAX_BYTES", 200_000),
         tavily_max_results=_env_int("TAVILY_MAX_RESULTS", 3),
         openai_input_cost_per_1m_tokens=_env_float("OPENAI_INPUT_COST_PER_1M_TOKENS", 0.15),
         openai_output_cost_per_1m_tokens=_env_float("OPENAI_OUTPUT_COST_PER_1M_TOKENS", 0.60),

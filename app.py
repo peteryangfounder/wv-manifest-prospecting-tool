@@ -20,6 +20,7 @@ from src.billing import (
 )
 from src.config import PROJECT_ROOT, get_settings
 from src.pipeline import (
+    collect_homepage_evidence,
     enrich_candidates,
     load_attendees,
     run_deterministic_classification,
@@ -1127,6 +1128,13 @@ def _tavily_billing_from_metrics(metrics: dict, settings) -> TavilyBillingSummar
 
 
 def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> dict:
+    homepage_candidates = db.candidates_for_homepage_evidence(
+        conn,
+        limit=min(cap, _setting_int(settings, "homepage_evidence_max_per_run", 100)),
+        mode=mode,
+        force=False,
+    )
+    homepage_summary = db.homepage_evidence_summary(conn, mode=mode)
     tavily_candidates = db.candidates_for_enrichment(conn, limit=cap, force=False, mode=mode)
     currently_scoreable = db.enriched_for_openai_scoring(conn, limit=cap, force=False, mode=mode)
     projected_tavily_calls = len(tavily_candidates)
@@ -1184,6 +1192,12 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> 
     return {
         "cap": cap,
         "mode": mode,
+        "projected_homepage_candidates": len(homepage_candidates),
+        "cached_resolved_domains": homepage_summary.get("resolved_domains", 0),
+        "cached_homepage_ready": homepage_summary.get("score_from_homepage", 0),
+        "cached_tavily_needed": homepage_summary.get("needs_tavily", 0),
+        "cached_tavily_skipped": homepage_summary.get("score_from_homepage", 0),
+        "cached_homepage_data_gaps": homepage_summary.get("data_gaps", 0),
         "projected_tavily_calls": projected_tavily_calls,
         "projected_openai_calls": projected_openai_calls,
         "high_signal_candidates": high_signal_candidates,
@@ -1710,6 +1724,12 @@ if pending_verify_run and run_step != "source":
             "Candidate universe",
             f"{_format_int(broad_universe_pending)} API-eligible of {_format_int(unique_universe_pending)} unique",
         ),
+        ("Domain discovery candidates", _format_int(pending_verify_run.get("projected_homepage_candidates") or 0)),
+        ("Cached resolved domains", _format_int(pending_verify_run.get("cached_resolved_domains") or 0)),
+        ("Homepage evidence-ready", _format_int(pending_verify_run.get("cached_homepage_ready") or 0)),
+        ("Tavily-needed from cache", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
+        ("Tavily skipped by homepage evidence", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
+        ("Homepage data gaps", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
         ("Uncached Tavily calls", _format_int(pending_verify_run["projected_tavily_calls"])),
         ("Projected OpenAI scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
         (
@@ -1777,6 +1797,15 @@ if run_step == "verify":
     progress = st.progress(0, text=f"Refreshing source screening before verifying up to {cap:,} companies...")
     preview = st.empty()
     classify_result = run_deterministic_classification(conn)
+    progress.progress(0.05, text="Collecting bounded homepage metadata before paid search...")
+
+    homepage_result = collect_homepage_evidence(
+        conn,
+        runtime_settings,
+        cap,
+        False,
+        mode=active_verify_mode,
+    )
 
     def enrichment_progress(index, total, result, counts):
         if total:

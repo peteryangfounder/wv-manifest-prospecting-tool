@@ -6,16 +6,21 @@ import random
 import time
 from dataclasses import dataclass
 from typing import Any
+import requests
 
 from . import db
 from .billing import calculate_tavily_billing
 from .clean import dedupe_names
 from .classify import classify_with_openai
 from .config import Settings
+from .domain_resolver import domain_status, generate_domain_candidates, score_domain_confidence
 from .enrich import EnrichmentUnavailable, TavilyClient, compact_tavily_response
+from .evidence_routing import route_candidate_after_homepage_evidence
+from .homepage_evidence import extract_homepage_evidence
 from .rules import classify_company_name
 from .score import baseline_score
 from .scrape import get_attendee_names
+from .web_metadata import fetch_homepage_metadata
 
 
 @dataclass
@@ -278,6 +283,148 @@ def enrich_candidates(
             "estimated_cost_usd": 0.0,
         },
     )
+
+
+def collect_homepage_evidence(
+    conn,
+    settings: Settings,
+    limit: int | None = None,
+    force: bool = False,
+    progress_callback=None,
+    mode: str = "balanced",
+) -> PipelineResult:
+    configured_limit = _setting_int(settings, "homepage_evidence_max_per_run", 100)
+    limit = min(limit or configured_limit, configured_limit)
+    run_id = db.start_run(conn, "homepage_evidence")
+    companies = db.candidates_for_homepage_evidence(conn, limit=limit, mode=mode, force=force)
+    processed = 0
+    accepted = 0
+    provisional = 0
+    unresolved = 0
+    score_ready = 0
+    needs_tavily = 0
+    errors = 0
+    commit_interval = _commit_interval(settings)
+    timeout = float(_setting(settings, "homepage_fetch_timeout_seconds", 4.0))
+    max_bytes = _setting_int(settings, "homepage_fetch_max_bytes", 200_000)
+
+    session = requests.Session()
+    for index, company in enumerate(companies, start=1):
+        result = _collect_homepage_for_company(company, session, timeout=timeout, max_bytes=max_bytes, mode=mode)
+        db.save_homepage_evidence(conn, result, commit=False)
+        if result.get("route_decision") == "score_from_homepage":
+            db.save_enrichment(conn, _homepage_enrichment_from_evidence(result), commit=False)
+        processed += 1
+        accepted += 1 if result.get("domain_status") == "accepted" else 0
+        provisional += 1 if result.get("domain_status") == "provisional" else 0
+        unresolved += 1 if result.get("domain_status") == "unresolved" else 0
+        score_ready += 1 if result.get("route_decision") == "score_from_homepage" else 0
+        needs_tavily += 1 if result.get("route_decision") == "needs_tavily" else 0
+        errors += 1 if result.get("fetch_error") else 0
+        if index % commit_interval == 0:
+            conn.commit()
+        if progress_callback:
+            progress_callback(index, len(companies), result, {
+                "processed": processed,
+                "accepted": accepted,
+                "provisional": provisional,
+                "unresolved": unresolved,
+                "score_ready": score_ready,
+                "needs_tavily": needs_tavily,
+                "errors": errors,
+            })
+    conn.commit()
+    db.finish_run(
+        conn,
+        run_id,
+        enriched_count=score_ready,
+        cache_hits=0,
+        estimated_cost_usd=0.0,
+        notes=f"Processed: {processed}. Accepted: {accepted}. Provisional: {provisional}. Unresolved: {unresolved}. Needs Tavily: {needs_tavily}. Mode: {mode}.",
+    )
+    return PipelineResult(
+        "homepage_evidence",
+        f"Collected homepage metadata for {processed:,} companies. {score_ready:,} are score-ready from homepage evidence; {needs_tavily:,} need search evidence.",
+        {
+            "processed": processed,
+            "accepted_domains": accepted,
+            "provisional_domains": provisional,
+            "unresolved_domains": unresolved,
+            "homepage_score_ready": score_ready,
+            "homepage_needs_tavily": needs_tavily,
+            "errors": errors,
+            "estimated_cost_usd": 0.0,
+        },
+    )
+
+
+def _collect_homepage_for_company(
+    company: dict[str, Any],
+    session: requests.Session,
+    *,
+    timeout: float,
+    max_bytes: int,
+    mode: str,
+) -> dict[str, Any]:
+    company_name = company["canonical_name"]
+    best = None
+    best_domain = None
+    best_confidence = 0.0
+    fetch_error = None
+
+    for domain in generate_domain_candidates(company_name):
+        metadata = fetch_homepage_metadata(domain, session=session, timeout=timeout, max_bytes=max_bytes)
+        confidence = score_domain_confidence(company_name, domain, metadata)
+        fetch_error = metadata.fetch_error or fetch_error
+        if confidence > best_confidence:
+            best = metadata
+            best_domain = domain
+            best_confidence = confidence
+        if confidence >= 0.85:
+            break
+
+    status = domain_status(best_confidence)
+    homepage = extract_homepage_evidence(best) if best is not None else None
+    route = route_candidate_after_homepage_evidence(domain_status=status, evidence=homepage, mode=mode)
+
+    return {
+        "company_id": company["id"],
+        "candidate_domain": best_domain,
+        "resolved_url": best.final_url if best is not None else None,
+        "domain_confidence": best_confidence,
+        "domain_status": status,
+        "metadata_json": best.to_dict() if best is not None else {},
+        "evidence_text": homepage.evidence_text if homepage is not None else "",
+        "evidence_quality": homepage.evidence_quality if homepage is not None else 0.0,
+        "positive_signals": ([*homepage.positive_signals, *homepage.wittington_signals] if homepage is not None else []),
+        "negative_signals": homepage.negative_signals if homepage is not None else [],
+        "route_decision": route.route,
+        "route_reason": route.reason,
+        "fetch_error": fetch_error,
+    }
+
+
+def _homepage_enrichment_from_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
+    metadata = evidence.get("metadata_json") or {}
+    return {
+        "company_id": evidence["company_id"],
+        "query": f"homepage:{evidence.get('candidate_domain') or ''}",
+        "provider": "homepage",
+        "raw_json": {
+            "metadata": metadata,
+            "domain_confidence": evidence.get("domain_confidence"),
+            "evidence_quality": evidence.get("evidence_quality"),
+            "positive_signals": evidence.get("positive_signals") or [],
+            "negative_signals": evidence.get("negative_signals") or [],
+            "route_decision": evidence.get("route_decision"),
+        },
+        "top_titles": [metadata.get("title") or metadata.get("og_title") or "Homepage evidence"],
+        "top_urls": [evidence.get("resolved_url")] if evidence.get("resolved_url") else [],
+        "top_snippets": [evidence.get("evidence_text") or ""],
+        "website": evidence.get("resolved_url"),
+        "status": "success",
+        "error": None,
+    }
 
 
 def score_enriched_candidates(

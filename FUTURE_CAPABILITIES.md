@@ -10,7 +10,7 @@ The data model should treat Manifest as one source adapter. Additional adapters 
 
 For arbitrary datasets, the app should support column mapping. A user should be able to map source columns such as company name, website, country, category, description, employee count, funding stage, source URL, contact name, email, and notes. When a row already includes useful first-party or third-party fields, the pipeline should use them instead of paying to rediscover the same facts.
 
-The source funnel should become configurable by campaign. The current Manifest demo uses a ranked candidate queue so obvious technology companies are enriched first and ambiguous candidates remain eligible after them. A production version should let a user choose between precision-first, balanced, and recall-first modes. Precision-first would enrich only high-signal rows. Balanced mode would include likely-tech rows plus a large ambiguous slice. Recall-first would enrich the broader candidate universe after an explicit cost approval step.
+The source funnel should become configurable by campaign. The current Manifest demo already has precision-first, balanced, and recall-first verification modes, plus a ranked candidate queue so obvious technology companies are enriched first and ambiguous candidates remain eligible after them. A production version should let users save those mode settings as reusable campaign policies, including budget caps, recall posture, required evidence depth, and false-negative audit size.
 
 ## First-Party Wittington Data
 
@@ -54,9 +54,9 @@ The production job system should support pause, resume, cancel, retry failed row
 
 For very large campaigns, the system should evaluate whether OpenAI Batch API, embeddings, structured extraction batches, or cheaper model tiers can reduce cost. The right approach may vary by step. Lightweight screening can use deterministic rules, embeddings, or smaller models. High-conviction candidates can receive richer synthesis from stronger models. This preserves quality where it matters without spending heavily on low-priority rows.
 
-Future cheap-recall layers could include website-domain discovery, homepage metadata extraction, embeddings over company names and descriptions, low-cost classifier models, company database lookups, and stratified sampling of ambiguous rows. These layers would reduce the chance that a promising company with a generic name is missed by the first deterministic pass.
+Future cheap-recall layers could build on the current website-domain and homepage-metadata pass with embeddings over company names and descriptions, low-cost classifier models, company database lookups, and stratified sampling of ambiguous rows. These layers would reduce the chance that a promising company with a generic name is missed by the first deterministic pass.
 
-The next major product improvement would be a free or near-free web-metadata pass before Tavily. For example, the app could discover likely domains from search result pages, fetch company homepages directly, parse titles/meta descriptions/schema.org data, and use that text to rank ambiguous companies before paid enrichment. That would add recall without sending every row immediately to an LLM.
+The first bounded web-metadata pass now exists, but it should become richer. Future versions should add better domain discovery, bounded `/about`, `/product`, `/platform`, and `/solutions` fetches, more robust wrong-entity detection, semantic scoring over extracted text, and audit samples for homepage-routed soft exclusions. That would add recall without sending every row immediately to an LLM.
 
 The target production cascade should be: conservative deterministic exclusion, domain discovery, homepage metadata extraction, local semantic triage, Tavily Basic Search for unresolved or uncertain rows, evidence-gated OpenAI scoring, dual ranking by investment fit and review priority, and false-negative audits. The app should store each stage as a versioned artifact so the team can measure whether the extra stage improved recall, precision, cost per useful lead, and review burden.
 

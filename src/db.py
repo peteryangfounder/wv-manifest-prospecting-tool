@@ -99,6 +99,26 @@ def init_db(conn: sqlite3.Connection) -> None:
             estimated_cost_usd REAL,
             notes TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS homepage_evidence (
+            id INTEGER PRIMARY KEY,
+            company_id INTEGER NOT NULL UNIQUE,
+            candidate_domain TEXT,
+            resolved_url TEXT,
+            domain_confidence REAL DEFAULT 0,
+            domain_status TEXT,
+            metadata_json TEXT,
+            evidence_text TEXT,
+            evidence_quality REAL DEFAULT 0,
+            positive_signals TEXT DEFAULT '[]',
+            negative_signals TEXT DEFAULT '[]',
+            route_decision TEXT,
+            route_reason TEXT,
+            fetch_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(company_id) REFERENCES companies(id) ON DELETE CASCADE
+        );
         """
     )
     migrate_schema(conn)
@@ -323,6 +343,105 @@ def save_score(
         conn.commit()
 
 
+def save_homepage_evidence(conn: sqlite3.Connection, evidence: dict[str, Any], *, commit: bool = True) -> None:
+    timestamp = now_iso()
+    conn.execute(
+        """
+        INSERT INTO homepage_evidence (
+            company_id, candidate_domain, resolved_url, domain_confidence, domain_status,
+            metadata_json, evidence_text, evidence_quality, positive_signals, negative_signals,
+            route_decision, route_reason, fetch_error, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(company_id) DO UPDATE SET
+            candidate_domain = excluded.candidate_domain,
+            resolved_url = excluded.resolved_url,
+            domain_confidence = excluded.domain_confidence,
+            domain_status = excluded.domain_status,
+            metadata_json = excluded.metadata_json,
+            evidence_text = excluded.evidence_text,
+            evidence_quality = excluded.evidence_quality,
+            positive_signals = excluded.positive_signals,
+            negative_signals = excluded.negative_signals,
+            route_decision = excluded.route_decision,
+            route_reason = excluded.route_reason,
+            fetch_error = excluded.fetch_error,
+            updated_at = excluded.updated_at
+        """,
+        (
+            evidence["company_id"],
+            evidence.get("candidate_domain"),
+            evidence.get("resolved_url"),
+            evidence.get("domain_confidence", 0.0),
+            evidence.get("domain_status"),
+            json.dumps(evidence.get("metadata_json") or {}),
+            evidence.get("evidence_text"),
+            evidence.get("evidence_quality", 0.0),
+            json.dumps(evidence.get("positive_signals") or []),
+            json.dumps(evidence.get("negative_signals") or []),
+            evidence.get("route_decision"),
+            evidence.get("route_reason"),
+            evidence.get("fetch_error"),
+            timestamp,
+            timestamp,
+        ),
+    )
+    if commit:
+        conn.commit()
+
+
+def get_homepage_evidence(conn: sqlite3.Connection, company_id: int) -> dict[str, Any] | None:
+    row = conn.execute("SELECT * FROM homepage_evidence WHERE company_id = ?", (company_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def candidates_for_homepage_evidence(
+    conn: sqlite3.Connection,
+    limit: int,
+    mode: str = "balanced",
+    force: bool = False,
+) -> list[dict[str, Any]]:
+    mode_filter = _candidate_mode_filter(mode)
+    existing_filter = "" if force else "AND h.id IS NULL"
+    rows = conn.execute(
+        f"""
+        SELECT c.*
+        FROM companies c
+        LEFT JOIN homepage_evidence h ON h.company_id = c.id
+        WHERE c.is_candidate = 1 {mode_filter} {existing_filter}
+        ORDER BY
+          CASE
+            WHEN c.high_priority_enrichment = 1 THEN 0
+            WHEN c.deterministic_type = 'likely_startup_or_tech' THEN 1
+            WHEN c.deterministic_type = 'unknown_needs_enrichment' THEN 2
+            ELSE 3
+          END,
+          c.canonical_name COLLATE NOCASE
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def homepage_evidence_summary(conn: sqlite3.Connection, mode: str = "balanced") -> dict[str, int]:
+    mode_filter = _candidate_mode_filter(mode, include_homepage_positive=True)
+    row = conn.execute(
+        f"""
+        SELECT
+          COALESCE(SUM(CASE WHEN h.domain_status IN ('accepted', 'provisional') THEN 1 ELSE 0 END), 0) AS resolved_domains,
+          COALESCE(SUM(CASE WHEN h.route_decision = 'score_from_homepage' THEN 1 ELSE 0 END), 0) AS score_from_homepage,
+          COALESCE(SUM(CASE WHEN h.route_decision = 'needs_tavily' THEN 1 ELSE 0 END), 0) AS needs_tavily,
+          COALESCE(SUM(CASE WHEN h.route_decision = 'low_priority_data_gap' THEN 1 ELSE 0 END), 0) AS data_gaps,
+          COALESCE(SUM(CASE WHEN h.route_decision = 'soft_exclude' THEN 1 ELSE 0 END), 0) AS soft_excluded
+        FROM companies c
+        LEFT JOIN homepage_evidence h ON h.company_id = c.id
+        WHERE c.is_candidate = 1 {mode_filter}
+        """
+    ).fetchone()
+    return {key: int(row[key] or 0) for key in row.keys()} if row else {}
+
+
 def get_successful_enrichment(conn: sqlite3.Connection, company_id: int, provider: str = "tavily") -> dict[str, Any] | None:
     row = conn.execute(
         "SELECT * FROM enrichments WHERE company_id = ? AND provider = ? AND status = 'success'",
@@ -364,7 +483,7 @@ def candidates_for_enrichment(
     mode: str = "balanced",
 ) -> list[dict[str, Any]]:
     priority_filter = "AND c.high_priority_enrichment = 1" if high_priority_only else ""
-    mode_filter = _candidate_mode_filter(mode)
+    mode_filter = _candidate_mode_filter(mode, include_homepage_positive=True)
     priority_order = """
               CASE
                 WHEN c.high_priority_enrichment = 1 THEN 0
@@ -377,6 +496,7 @@ def candidates_for_enrichment(
         query = f"""
             SELECT c.*
             FROM companies c
+            LEFT JOIN homepage_evidence h ON h.company_id = c.id
             WHERE c.is_candidate = 1 {priority_filter} {mode_filter}
             ORDER BY
               {priority_order}
@@ -389,7 +509,10 @@ def candidates_for_enrichment(
             FROM companies c
             LEFT JOIN enrichments e
               ON e.company_id = c.id AND e.provider = 'tavily' AND e.status = 'success'
-            WHERE c.is_candidate = 1 {priority_filter} {mode_filter} AND e.id IS NULL
+            LEFT JOIN homepage_evidence h ON h.company_id = c.id
+            WHERE c.is_candidate = 1 {priority_filter} {mode_filter}
+              AND e.id IS NULL
+              AND COALESCE(h.route_decision, '') NOT IN ('score_from_homepage', 'soft_exclude', 'low_priority_data_gap')
             ORDER BY
               {priority_order}
               c.canonical_name COLLATE NOCASE
@@ -411,7 +534,7 @@ def enriched_for_openai_scoring(
     else:
         score_filter = "AND (s.id IS NULL OR s.provider != 'openai')"
     priority_filter = "AND c.high_priority_enrichment = 1" if high_priority_only else ""
-    mode_filter = _candidate_mode_filter(mode)
+    mode_filter = _candidate_mode_filter(mode, include_homepage_positive=True)
     priority_order = """
           CASE
             WHEN c.high_priority_enrichment = 1 THEN 0
@@ -423,11 +546,20 @@ def enriched_for_openai_scoring(
 
     rows = conn.execute(
         f"""
-        SELECT c.*, e.top_titles, e.top_urls, e.top_snippets, e.website, e.raw_json AS enrichment_raw_json
+        SELECT
+          c.*,
+          COALESCE(e_t.top_titles, e_h.top_titles) AS top_titles,
+          COALESCE(e_t.top_urls, e_h.top_urls) AS top_urls,
+          COALESCE(e_t.top_snippets, e_h.top_snippets) AS top_snippets,
+          COALESCE(e_t.website, e_h.website) AS website,
+          COALESCE(e_t.raw_json, e_h.raw_json) AS enrichment_raw_json
         FROM companies c
-        JOIN enrichments e ON e.company_id = c.id AND e.provider = 'tavily' AND e.status = 'success'
+        LEFT JOIN enrichments e_t ON e_t.company_id = c.id AND e_t.provider = 'tavily' AND e_t.status = 'success'
+        LEFT JOIN enrichments e_h ON e_h.company_id = c.id AND e_h.provider = 'homepage' AND e_h.status = 'success'
+        LEFT JOIN homepage_evidence h ON h.company_id = c.id
         LEFT JOIN scores s ON s.company_id = c.id
         WHERE c.is_candidate = 1 {priority_filter} {mode_filter} {score_filter}
+          AND (e_t.id IS NOT NULL OR e_h.id IS NOT NULL)
         ORDER BY
           {priority_order}
           c.canonical_name COLLATE NOCASE
@@ -438,16 +570,23 @@ def enriched_for_openai_scoring(
     return [dict(row) for row in rows]
 
 
-def _candidate_mode_filter(mode: str) -> str:
+def _candidate_mode_filter(mode: str, *, include_homepage_positive: bool = False) -> str:
     if str(mode or "").strip().lower().replace("_", "-") in {"precision", "precision-first"}:
+        if include_homepage_positive:
+            return "AND (c.deterministic_type = 'likely_startup_or_tech' OR h.route_decision = 'score_from_homepage')"
         return "AND c.deterministic_type = 'likely_startup_or_tech'"
     return ""
 
 
 def count_candidate_universe(conn: sqlite3.Connection, mode: str = "balanced") -> int:
-    mode_filter = _candidate_mode_filter(mode)
+    mode_filter = _candidate_mode_filter(mode, include_homepage_positive=True)
     row = conn.execute(
-        f"SELECT COUNT(*) FROM companies c WHERE c.is_candidate = 1 {mode_filter}"
+        f"""
+        SELECT COUNT(*)
+        FROM companies c
+        LEFT JOIN homepage_evidence h ON h.company_id = c.id
+        WHERE c.is_candidate = 1 {mode_filter}
+        """
     ).fetchone()
     return int(row[0] if row else 0)
 
