@@ -2,7 +2,7 @@
 
 Manifest Prospecting Tool is an internal VC sourcing dashboard for Wittington Ventures. It turns the public Manifest attendee list into two clear working views: a source list with cleaned attendee rows and a verified prospect list backed by external evidence.
 
-The product uses code for retrieval, storage, filtering, and cost control. It uses Tavily for external search evidence, then uses OpenAI for scoring after that evidence has been retrieved and cached.
+The product uses code for retrieval, storage, filtering, concurrency, retry handling, and cost control. It uses Tavily for external search evidence, then uses OpenAI for scoring after that evidence has been retrieved and cached.
 
 Hosted app: https://wv-manifest-prospecting-tool-b8jadagmhgsh8wirbknjb9.streamlit.app/
 
@@ -13,8 +13,10 @@ Hosted app: https://wv-manifest-prospecting-tool-b8jadagmhgsh8wirbknjb9.streamli
 - Verified prospects view for companies that passed evidence enrichment and API scoring.
 - Larger full-width charts with horizontal labels for readability.
 - Responsive prospect cards so company descriptions and sector tags stay readable across desktop, tablet, and mobile.
-- Prominent billing summary that separates provider-billed spend from local token estimates and Tavily credit consumption.
-- Model selector and batch cap for controlling how many companies get verified in each run.
+- Prominent API usage and cost summary that separates live provider billing, included Tavily credits, Streamlit Cloud hosting, and internal token-rate estimates.
+- Wittington project lifetime-to-date OpenAI billing, recent OpenAI billing, last fetch time, cache status, and billing-window metadata.
+- Model selector and batch cap for controlling how many companies get verified in each run, with pre-run cost and runtime confirmation before paid provider calls begin.
+- Concurrent Tavily enrichment and OpenAI scoring with bounded retry/backoff for rate limits and transient provider errors.
 - Scoring weight controls for investor preference changes.
 - Simple reset button that clears local source rows, cached enrichments, scores, and run history.
 - CSV exports for source rows and verified prospects.
@@ -82,7 +84,9 @@ Use the dashboard in this order:
 1. Click **1. Load and screen source data**.
 2. Choose the number of companies to verify and the OpenAI model.
 3. Click **2. Verify prospects with APIs**.
-4. Review the Overview, Source list, Verified prospects, and Company detail tabs.
+4. Review the projected Tavily calls, OpenAI calls, token-rate estimate, Tavily billed cost, total estimated provider cost, worker counts, and estimated runtime.
+5. Click **Confirm and start API run** if the estimate is acceptable.
+6. Review the Overview, Source list, Verified prospects, and Company detail tabs.
 
 For a command-line run:
 
@@ -104,7 +108,7 @@ python scripts/run_pipeline.py --score --max-score 25
 
 `src/clean.py` preserves the raw company name while creating a normalized key for deduplication. Legal suffixes like `Inc.`, `LLC`, and `Corporation` are removed only for matching.
 
-`src/rules.py` applies cheap classification before any paid API call. It filters obvious non-targets such as large incumbents, investors, associations, universities, consultancies, generic placeholders, and logistics service providers without software or platform signals.
+`src/rules.py` applies cheap classification before any paid API call. It filters obvious non-targets such as large incumbents, investors, associations, universities, consultancies, generic placeholders, and logistics service providers without software or platform signals. It also creates a high-priority enrichment queue so paid provider calls start with the rows most likely to produce investor-relevant prospects.
 
 `src/enrich.py` calls Tavily with a compact company-search query and stores titles, URLs, snippets, website hints, and raw JSON in SQLite.
 
@@ -112,15 +116,15 @@ python scripts/run_pipeline.py --score --max-score 25
 
 `src/db.py` stores companies, enrichments, scores, and run metadata. The dashboard uses that run metadata for API-call counts, tokens, cache hits, and estimated spend.
 
-The enrichment and scoring stages run provider requests concurrently while keeping SQLite writes on the main thread. `TAVILY_CONCURRENCY` and `OPENAI_CONCURRENCY` control the number of simultaneous provider requests. They improve throughput but do not change the number of provider calls; the dashboard batch size and cache reuse remain the primary cost controls. `DB_COMMIT_BATCH_SIZE` controls how often completed results are committed during a run.
+The enrichment and scoring stages run provider requests concurrently while keeping SQLite writes on the main thread. `TAVILY_CONCURRENCY` and `OPENAI_CONCURRENCY` control the number of simultaneous provider requests. This turns the slowest parts of the workflow from one-company-at-a-time waiting into parallel I/O while preserving deterministic database writes. The worker counts improve throughput but do not change the number of provider calls; the dashboard batch size, high-priority queue, and cache reuse remain the primary cost controls. `DB_COMMIT_BATCH_SIZE` controls how often completed results are committed during a run.
 
 Before a verification run starts, the dashboard shows a confirmation step with projected uncached Tavily calls, projected OpenAI scoring calls, estimated token usage, estimated provider cost, and approximate runtime. No Tavily or OpenAI provider calls are made until the user confirms that estimate.
 
-Provider calls use bounded retries with exponential backoff and jitter for transient errors such as rate limits and 5xx responses. `PROVIDER_MAX_RETRIES`, `PROVIDER_BACKOFF_INITIAL_SECONDS`, and `PROVIDER_BACKOFF_MAX_SECONDS` control that behavior. Non-retryable provider failures are recorded per company so a single bad row does not stop the full batch.
+Provider calls use bounded retries with exponential backoff and jitter for transient errors such as 408, 409, 425, 429, and 5xx responses. When a provider includes `Retry-After`, the app uses it. `PROVIDER_MAX_RETRIES`, `PROVIDER_BACKOFF_INITIAL_SECONDS`, and `PROVIDER_BACKOFF_MAX_SECONDS` control that behavior. Non-retryable provider failures are recorded per company so a single bad row does not stop the full batch.
 
 ## Billing And Usage Tracking
 
-The dashboard separates provider-billed spend from internal estimates:
+The **API usage and cost** section separates provider-billed spend from internal estimates:
 
 - Tavily search calls
 - Tavily plan credits consumed
@@ -138,9 +142,27 @@ The dashboard separates provider-billed spend from internal estimates:
 - Tavily shadow value for planning only
 - Streamlit Community Cloud hosting shown as `$0.00`
 
-Provider-billed OpenAI cost for the configured `OPENAI_BILLING_PROJECT_ID` is the source of truth for live billing when available. The primary dashboard total uses `OPENAI_BILLING_START_DATE` through the current time for the Wittington project lifetime-to-date window. If project-scoped billing is unavailable and the OpenAI API returns organization-level fallback data, the app labels it as org-wide context and keeps it separate from the project billed-cost total. If live OpenAI billing is unavailable because `OPENAI_ADMIN_KEY` is missing or the API request fails, the app continues running and clearly labels the internal token-rate fallback as an estimate rather than platform billing data. SQLite stores every run so reruns can show cumulative calls, tokens, cache hits, and local estimates.
+Provider-billed OpenAI cost for the configured `OPENAI_BILLING_PROJECT_ID` is the source of truth for live billing when available. The primary dashboard total uses `OPENAI_BILLING_START_DATE` through the current time for the Wittington project lifetime-to-date window. The recent-cost card keeps `OPENAI_BILLING_LOOKBACK_DAYS` for a shorter usage view. OpenAI billing responses are paginated and cached for `OPENAI_BILLING_CACHE_TTL_SECONDS` because Streamlit reruns frequently. If project-scoped billing is unavailable and the OpenAI API returns organization-level fallback data, the app labels it as org-wide context and keeps it separate from the project billed-cost total. If live OpenAI billing is unavailable because `OPENAI_ADMIN_KEY` is missing or the API request fails, the app continues running and clearly labels the internal token-rate fallback as an estimate rather than platform billing data. SQLite stores every run so reruns can show cumulative calls, tokens, cache hits, retry counts, and local estimates.
 
 `TAVILY_COST_PER_CALL_USD` remains supported as an internal shadow estimate for projections. It is not included in actual provider-billed spend unless Tavily pay-as-you-go is explicitly enabled, in which case overage credits beyond `TAVILY_INCLUDED_MONTHLY_CREDITS` are billed using `TAVILY_PAYG_PRICE_PER_CREDIT_USD`.
+
+For the current demo configuration, Tavily pay-as-you-go should remain disabled unless Wittington explicitly wants automated overage billing. With pay-as-you-go disabled, the app can still report credits consumed and remaining included credits while keeping Tavily billed spend at `$0.00`.
+
+## Performance And Cost Controls
+
+The app is designed to scale from a small demo batch to thousands of attendee rows without making cost or latency invisible:
+
+- Rule screening and baseline scoring run before paid APIs.
+- Cached Tavily enrichments and OpenAI scores are reused on reruns.
+- The high-priority queue sends likely venture prospects to paid enrichment before lower-fit rows.
+- Tavily and OpenAI provider calls run in parallel with configurable worker counts.
+- SQLite writes are serialized and batched to avoid thread contention.
+- Transient provider failures use bounded retry/backoff with jitter.
+- Terminal provider failures fall back to recorded error state or baseline score instead of stopping the run.
+- The confirmation step estimates uncached calls, model tokens, OpenAI token-rate cost, Tavily billed cost, total provider cost, worker counts, credits after the run, and approximate runtime before provider calls start.
+- Live billing reads through `OPENAI_ADMIN_KEY` are administrative reads and are not counted as model/token spend.
+
+The current Streamlit implementation runs verification synchronously after confirmation. A production deployment should move long runs into a resumable background job queue if pause, resume, cancellation, or multi-user scheduling are required.
 
 ## Caching And Reset
 
@@ -193,6 +215,7 @@ Create a Streamlit Cloud app from this repository, set `app.py` as the entrypoin
 - The seed attendee file is included for reliability, but the live scrape should be rerun before a demo.
 - Funding stage is inferred from public snippets unless a richer company-data API is added.
 - OpenAI scoring depends on retrieved evidence quality, so thin evidence is marked low confidence.
+- Long provider runs are synchronous in the current Streamlit app; a background worker architecture would be needed for true pause/resume/cancel across sessions.
 
 ## Related Notes
 
