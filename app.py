@@ -89,7 +89,7 @@ DISPLAY_LABELS = {
     "stage_signal": "Stage signal",
     "startup": "Startup",
     "supply_chain": "Supply chain",
-    "tavily_enrichment": "Search enrichment",
+    "tavily_enrichment": "Web search evidence",
     "technology": "Technology",
     "traction_signal": "Traction signal",
     "university_government_nonprofit": "University, government, or nonprofit",
@@ -291,6 +291,14 @@ CUSTOM_CSS = """
     font-size: 0.88rem;
     font-weight: 700;
     padding-top: 0.62rem;
+    text-align: center;
+  }
+  .slide-action-note {
+    color: #667085;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.3;
+    margin-bottom: 0.3rem;
     text-align: center;
   }
   .flow-grid {
@@ -1337,14 +1345,22 @@ def _render_mini_metrics(items: list[tuple]) -> None:
     st.markdown("".join(body), unsafe_allow_html=True)
 
 
+def _slide_progress_state(index: int, total: int) -> tuple[float, str]:
+    if index <= 0:
+        return 0.0, "Overview"
+    step_total = max(1, total - 1)
+    step_index = min(index, step_total)
+    return (step_index / step_total) * 100, f"Step {step_index} / {step_total}"
+
+
 def _render_slide_progress(index: int, total: int) -> None:
-    pct = ((index + 1) / max(1, total)) * 100
+    pct, label = _slide_progress_state(index, total)
     st.markdown(
         "<div class='slide-progress'>"
         "<div class='slide-progress-track'>"
         f"<span class='slide-progress-fill' style='width:{pct:.1f}%'></span>"
         "</div>"
-        f"<div class='slide-progress-text'>{index + 1} / {total}</div>"
+        f"<div class='slide-progress-text'>{html.escape(label)}</div>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -1596,6 +1612,15 @@ def _row_count_label(value: int, max_count: int) -> str:
     return f"{_format_int(value)} rows"
 
 
+def _coerce_prospect_cap(candidate_count: int, current_cap: int) -> int:
+    cap_limit = max(1, int(candidate_count or 1))
+    options = _row_count_options(cap_limit)
+    current_cap = max(1, min(int(current_cap or cap_limit), cap_limit))
+    if current_cap not in options:
+        current_cap = 100 if 100 in options else options[-1]
+    return current_cap
+
+
 def _render_processing_controls(candidate_count: int, current_cap: int) -> int:
     if candidate_count <= 0:
         st.markdown(
@@ -1608,9 +1633,9 @@ def _render_processing_controls(candidate_count: int, current_cap: int) -> int:
         return max(1, int(current_cap or 1))
 
     options = _row_count_options(candidate_count)
-    current_cap = max(1, min(int(current_cap or candidate_count), candidate_count))
-    if current_cap not in options:
-        current_cap = 100 if 100 in options else options[-1]
+    current_cap = _coerce_prospect_cap(candidate_count, current_cap)
+    if st.session_state.get("prospect_cap_choice") not in options:
+        st.session_state["prospect_cap_choice"] = current_cap
     index = options.index(current_cap)
     st.markdown(
         "<div class='control-group'>"
@@ -1630,6 +1655,39 @@ def _render_processing_controls(candidate_count: int, current_cap: int) -> int:
     )
     st.session_state["prospect_cap"] = int(selected_cap)
     return int(selected_cap)
+
+
+def _render_slide_footer(
+    *,
+    slide_index: int,
+    slide_count: int,
+    action_label: str,
+    action_key: str,
+    action_disabled: bool = False,
+    action_help: str | None = None,
+) -> bool:
+    _pct, progress_label = _slide_progress_state(slide_index, slide_count)
+    st.markdown("<div class='header-divider'></div>", unsafe_allow_html=True)
+    nav_cols = st.columns((1, 1.35, 1))
+    if nav_cols[0].button("Previous", disabled=slide_index == 0, use_container_width=True, key="slide_previous"):
+        st.session_state["slide_index"] = max(0, slide_index - 1)
+        st.rerun()
+    nav_cols[1].markdown(
+        f"<div class='slide-action-note'>{html.escape(progress_label)}</div>",
+        unsafe_allow_html=True,
+    )
+    action_clicked = nav_cols[1].button(
+        action_label,
+        type="primary",
+        disabled=action_disabled,
+        use_container_width=True,
+        key=action_key,
+        help=action_help,
+    )
+    if nav_cols[2].button("Next", disabled=slide_index >= slide_count - 1, use_container_width=True, key="slide_next"):
+        st.session_state["slide_index"] = min(slide_count - 1, slide_index + 1)
+        st.rerun()
+    return action_clicked
 
 
 def _local_openai_estimate_usd(metrics: dict, settings) -> float:
@@ -2164,7 +2222,7 @@ verify_mode = st.session_state.get("verify_mode", "balanced")
 if verify_mode not in VERIFY_MODE_PRESETS:
     verify_mode = "balanced"
 model_pricing = _selected_model_pricing(selected_model)
-prospect_cap = int(st.session_state.get("prospect_cap", st.session_state.get("prospect_cap_choice", min(settings.max_score, 100))))
+prospect_cap = int(st.session_state.get("prospect_cap_choice", st.session_state.get("prospect_cap", min(settings.max_score, 100))))
 runtime_settings = _settings_for_run(settings, selected_model, model_pricing["input"], model_pricing["output"])
 
 if st.session_state.pop("clear_processing_cache_requested", False):
@@ -2203,27 +2261,52 @@ if st.session_state.pop("prepare_manifest_requested", False):
     frame, metrics = _load_frame_and_metrics(conn)
     st.rerun()
 
-if st.session_state.pop("start_paid_run_requested", False):
-    cap = int(prospect_cap)
+if st.session_state.pop("check_company_pages_requested", False):
     active_verify_mode = st.session_state.get("active_verify_mode", verify_mode)
-    progress = st.progress(0, text=f"Refreshing company type labels before scoring up to {cap:,} companies...")
-    preview = st.empty()
-    classify_result = run_deterministic_classification(conn)
-    progress.progress(0.05, text="Reading bounded homepage metadata before paid search...")
+    homepage_cap = min(
+        max(1, int(st.session_state.get("homepage_check_cap", _setting_int(settings, "homepage_evidence_max_per_run", 100)))),
+        _setting_int(settings, "homepage_evidence_max_per_run", 100),
+    )
+    progress = st.progress(0, text=f"Checking up to {homepage_cap:,} company pages...")
+
+    def homepage_progress(index, total, result, counts):
+        if total:
+            progress.progress(
+                min(1.0, index / total),
+                text=f"Company page check {index:,}/{total:,}",
+            )
 
     homepage_result = collect_homepage_evidence(
         conn,
         runtime_settings,
-        cap,
+        homepage_cap,
         False,
+        progress_callback=homepage_progress,
         mode=active_verify_mode,
     )
+    progress.progress(1.0, text="Company page check finished.")
+    st.session_state["last_action"] = {
+        "message": homepage_result.message,
+        "level": "warning" if homepage_result.counts.get("errors") else "success",
+    }
+    st.session_state.pop("active_verify_mode", None)
+    st.session_state.pop("homepage_check_cap", None)
+    frame, metrics = _load_frame_and_metrics(conn)
+    st.rerun()
+
+if st.session_state.pop("start_paid_run_requested", False):
+    cap = int(prospect_cap)
+    active_verify_mode = st.session_state.get("active_verify_mode", verify_mode)
+    progress = st.progress(0, text=f"Refreshing company type labels before running up to {cap:,} companies...")
+    preview = st.empty()
+    classify_result = run_deterministic_classification(conn)
+    progress.progress(0.05, text="Starting web search for companies that still need search evidence...")
 
     def enrichment_progress(index, total, result, counts):
         if total:
             progress.progress(
                 min(0.5, (index / total) * 0.5),
-                text=f"Search enrichment {index:,}/{total:,}: {result.get('company_name', '')}",
+                text=f"Web search {index:,}/{total:,}: {result.get('company_name', '')}",
             )
 
     def scoring_progress(index, total, result, counts):
@@ -2307,7 +2390,8 @@ classified_count = int(metrics.get("classified") or 0)
 exclusions_applied = classified_count > 0
 excluded_or_placeholder_count = max(0, unique_company_count - candidate_count) if exclusions_applied else 0
 prospect_cap_limit = max(1, candidate_count or unique_company_count or int(settings.max_score or 1))
-prospect_cap = max(1, min(int(prospect_cap or prospect_cap_limit), prospect_cap_limit))
+prospect_cap = _coerce_prospect_cap(prospect_cap_limit, int(prospect_cap or prospect_cap_limit))
+st.session_state["prospect_cap"] = prospect_cap
 run_totals = metrics.get("run_totals") or {}
 last_run = metrics.get("last_run") or {}
 last_api_calls = int(last_run.get("tavily_calls") or 0) + int(last_run.get("openai_calls") or 0)
@@ -2431,7 +2515,13 @@ st.markdown("<div class='header-divider'></div>", unsafe_allow_html=True)
 _render_slide_progress(slide_index, slide_count)
 _render_slide_header(slide["label"], slide["title"], slide["copy"])
 
+footer_action_label = "Refresh"
+footer_action_key = f"slide_action_{slide['key']}"
+footer_action_disabled = False
+footer_action_help = None
+
 if slide["key"] == "overview":
+    footer_action_label = "Start workflow"
     _render_flow_steps(
         [
             ("Raw rows", "Load attendee-company rows from Manifest."),
@@ -2444,6 +2534,9 @@ if slide["key"] == "overview":
         ],
     )
 elif slide["key"] == "source":
+    footer_action_label = "Load Manifest list"
+    footer_action_disabled = workflow_stage != 1
+    footer_action_help = "The source list is already loaded." if footer_action_disabled else None
     _render_mini_metrics(
         [
             (
@@ -2465,10 +2558,10 @@ elif slide["key"] == "source":
             ("Saved rows", f"{_format_int(raw_manifest_row_count)} raw attendee-company rows"),
         ],
     )
-    if workflow_stage == 1 and st.button("Load Manifest list", type="primary", use_container_width=True):
-        st.session_state["load_manifest_requested"] = True
-        st.rerun()
 elif slide["key"] == "normalize":
+    footer_action_label = "Normalize company names"
+    footer_action_disabled = workflow_stage != 2
+    footer_action_help = "Load the Manifest list first." if workflow_stage < 2 else "Company names are already normalized."
     _render_mini_metrics(
         [
             (
@@ -2504,10 +2597,13 @@ elif slide["key"] == "normalize":
     )
     if workflow_stage == 1:
         st.warning("Load the Manifest list before normalizing company names.")
-    elif workflow_stage == 2 and st.button("Normalize company names", type="primary", use_container_width=True):
-        st.session_state["normalize_manifest_requested"] = True
-        st.rerun()
 elif slide["key"] == "exclusions":
+    footer_action_label = "Remove excluded rows"
+    footer_action_disabled = workflow_stage != 3
+    if workflow_stage < 3:
+        footer_action_help = "Load and normalize company names first."
+    elif workflow_stage > 3:
+        footer_action_help = "Excluded rows are already removed."
     _render_mini_metrics(
         [
             (
@@ -2547,14 +2643,19 @@ elif slide["key"] == "exclusions":
         st.warning("Load the Manifest list before removing excluded rows.")
     elif workflow_stage == 2:
         st.warning("Normalize company names before removing excluded rows.")
-    elif workflow_stage == 3 and st.button("Remove excluded rows", type="primary", use_container_width=True):
-        st.session_state["prepare_manifest_requested"] = True
-        st.rerun()
 elif slide["key"] == "homepage":
     homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
     homepage_scoreable = int(cascade_summary.get("score_from_homepage") or 0)
     homepage_needs_search = int(cascade_summary.get("needs_tavily") or 0)
     homepage_data_gaps = int(cascade_summary.get("data_gaps") or 0)
+    homepage_pending = int((pending_verify_run or {}).get("projected_homepage_candidates") or 0)
+    homepage_check_cap = min(homepage_pending or _setting_int(settings, "homepage_evidence_max_per_run", 100), _setting_int(settings, "homepage_evidence_max_per_run", 100))
+    footer_action_label = f"Check {homepage_check_cap:,} company pages" if homepage_check_cap > 0 else "Check company pages"
+    footer_action_disabled = workflow_stage < 4 or homepage_pending <= 0
+    if workflow_stage < 4:
+        footer_action_help = "Remove excluded rows before checking company pages."
+    elif homepage_pending <= 0:
+        footer_action_help = "No unchecked company pages remain in the current queue."
     _render_mini_metrics(
         [
             (
@@ -2587,8 +2688,12 @@ elif slide["key"] == "homepage":
         ],
     )
 elif slide["key"] == "estimate":
+    footer_action_label = "Run search and scoring"
     if pending_verify_run:
         prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
+        homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
+        footer_action_disabled = homepage_checked <= 0
+        footer_action_help = "Check company pages before approving the search and scoring run." if footer_action_disabled else None
         _render_mini_metrics(
             [
                 (
@@ -2615,25 +2720,12 @@ elif slide["key"] == "estimate":
         )
         _render_summary_card("Run estimate", projected_rows)
         _render_summary_card("Company page and web search counts", cascade_rows)
-        _render_stage_table(
-            "Rows included in the selected batch",
-            "First rows shown. The selected row count controls the estimate above and the maximum rows sent through company-page checks, Tavily Search API, and OpenAI API scoring.",
-            selected_batch_table,
-            [
-                ("canonical_name", "Company name", "company"),
-                ("deterministic_type_display", "Company type label", "text"),
-                ("source_status", "Processing status", "text"),
-                ("score_status_display", "Scoring status", "text"),
-            ],
-            "No rows are available for the selected batch.",
-        )
-        if st.button("Run search and scoring", type="primary", use_container_width=True):
-            st.session_state["active_verify_mode"] = pending_mode
-            st.session_state["start_paid_run_requested"] = True
-            st.rerun()
     else:
+        footer_action_disabled = True
+        footer_action_help = "Load, normalize, and remove excluded rows before approving a run."
         st.warning("Load the Manifest list before estimating search and scoring.")
 elif slide["key"] == "cost":
+    footer_action_label = "Refresh cost data"
     _render_mini_metrics(
         [
             (
@@ -2684,6 +2776,7 @@ elif slide["key"] == "cost":
         "No API run history recorded yet.",
     )
 elif slide["key"] == "prospects":
+    footer_action_label = "Refresh scored companies"
     _render_prospect_cards(
         prospects.head(5),
         "No scored companies yet. Run search and scoring first.",
@@ -2702,6 +2795,7 @@ elif slide["key"] == "prospects":
         "No OpenAI-scored rows yet.",
     )
 elif slide["key"] == "routing":
+    footer_action_label = "Refresh routing counts"
     _render_summary_card(
         "Company page and web search counts",
         [
@@ -2725,16 +2819,33 @@ elif slide["key"] == "routing":
         "No company-page routing rows saved yet.",
     )
 
-nav_cols = st.columns((1, 1, 1))
-if nav_cols[0].button("Previous", disabled=slide_index == 0, use_container_width=True):
-    st.session_state["slide_index"] = max(0, slide_index - 1)
-    st.rerun()
-nav_cols[1].markdown(
-    f"<div class='slide-nav-note'>{slide_index + 1} / {slide_count}</div>",
-    unsafe_allow_html=True,
+footer_clicked = _render_slide_footer(
+    slide_index=slide_index,
+    slide_count=slide_count,
+    action_label=footer_action_label,
+    action_key=footer_action_key,
+    action_disabled=footer_action_disabled,
+    action_help=footer_action_help,
 )
-if nav_cols[2].button("Next", disabled=slide_index >= slide_count - 1, type="primary", use_container_width=True):
-    st.session_state["slide_index"] = min(slide_count - 1, slide_index + 1)
+if footer_clicked:
+    if slide["key"] == "overview":
+        st.session_state["slide_index"] = min(slide_count - 1, 1)
+    elif slide["key"] == "source":
+        st.session_state["load_manifest_requested"] = True
+    elif slide["key"] == "normalize":
+        st.session_state["normalize_manifest_requested"] = True
+    elif slide["key"] == "exclusions":
+        st.session_state["prepare_manifest_requested"] = True
+    elif slide["key"] == "homepage":
+        st.session_state["active_verify_mode"] = pending_mode
+        st.session_state["homepage_check_cap"] = min(
+            int((pending_verify_run or {}).get("projected_homepage_candidates") or _setting_int(settings, "homepage_evidence_max_per_run", 100)),
+            _setting_int(settings, "homepage_evidence_max_per_run", 100),
+        )
+        st.session_state["check_company_pages_requested"] = True
+    elif slide["key"] == "estimate":
+        st.session_state["active_verify_mode"] = pending_mode
+        st.session_state["start_paid_run_requested"] = True
     st.rerun()
 
 st.stop()

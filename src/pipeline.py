@@ -218,7 +218,7 @@ def run_deterministic_classification(conn) -> PipelineResult:
     )
     return PipelineResult(
         "deterministic_classification",
-        f"Classified {len(companies):,} companies. {candidates:,} broad candidates. {high_priority:,} high-priority for paid enrichment.",
+        f"Classified {len(companies):,} companies. {candidates:,} broad candidates. {high_priority:,} first-priority for search and scoring.",
         {"companies": len(companies), "candidates": candidates, "high_priority_queue": high_priority},
     )
 
