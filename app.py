@@ -55,7 +55,7 @@ COMPONENT_MAX = {
 
 DISPLAY_LABELS = {
     "ai": "AI",
-    "baseline": "Rule screen",
+    "baseline": "Rule score",
     "cache_verification": "Cache check",
     "climate": "Climate",
     "commerce": "Commerce",
@@ -64,7 +64,7 @@ DISPLAY_LABELS = {
     "consulting_or_agency": "Consulting or agency",
     "consumer": "Consumer",
     "data_confidence": "Source data confidence",
-    "duplicate_or_noisy_entry": "Placeholder or noisy entry",
+    "duplicate_or_noisy_entry": "Placeholder or incomplete company name",
     "fintech": "Fintech",
     "food": "Food",
     "healthcare": "Healthcare",
@@ -139,7 +139,7 @@ VERIFY_MODE_PRESETS = {
     },
     "recall-first": {
         "label": "Recall-first",
-        "description": "Score all API-eligible company types inside the approved batch size.",
+        "description": "Score every company type kept after rule filtering, up to the approved batch size.",
     },
 }
 
@@ -1149,7 +1149,7 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["deterministic_type_display"] = frame["deterministic_type"].apply(_humanize)
     frame["confidence_display"] = frame["confidence"].apply(_humanize)
     frame["score_source_display"] = frame["score_provider"].apply(_humanize)
-    frame["source_status"] = frame["is_candidate"].apply(lambda value: "Candidate" if int(value or 0) else "Filtered out")
+    frame["source_status"] = frame["is_candidate"].apply(lambda value: "Kept by rules" if int(value or 0) else "Removed by rules")
     placeholder_mask = frame["canonical_name"].apply(_is_generic_placeholder)
     if placeholder_mask.any():
         frame.loc[placeholder_mask, "is_candidate"] = 0
@@ -1161,7 +1161,7 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
         frame.loc[placeholder_mask, "company_type_display"] = _humanize("duplicate_or_noisy_entry")
         frame.loc[placeholder_mask, "deterministic_type_display"] = _humanize("duplicate_or_noisy_entry")
         frame.loc[placeholder_mask, "is_refined_prospect"] = False
-        frame.loc[placeholder_mask, "source_status"] = "Filtered out"
+        frame.loc[placeholder_mask, "source_status"] = "Removed by rules"
         frame.loc[placeholder_mask, "rationale"] = "Filtered out, generic placeholder entry rather than a named company."
     frame["rationale_preview"] = frame["rationale"].apply(lambda value: _clean_ui_text(_truncate(value, 140)))
     frame["evidence_preview"] = frame["evidence_summary"].apply(lambda value: _clean_ui_text(_truncate(value, 180)))
@@ -1299,7 +1299,7 @@ def _route_examples_html(examples: list[dict], empty_message: str = "No cached e
             f"<div class='route-meta'>Positive: {_signal_pills(positives, 'None')}</div>"
             f"<div class='route-meta'>Negative: {_signal_pills(negatives, 'None')}</div>"
             f"<div class='route-snippet'>{html.escape(_clean_ui_text(_truncate(example.get('evidence_text') or example.get('fetch_error') or 'No homepage metadata available.', 220)))}</div>"
-            f"<div class='route-meta'>Status note: {html.escape(_clean_ui_text(example.get('route_reason') or 'No status note recorded.'))}</div>"
+            f"<div class='route-meta'>Page/search note: {html.escape(_clean_ui_text(example.get('route_reason') or 'No page/search note recorded.'))}</div>"
             "</div>"
         )
     body.append("</div>")
@@ -1358,7 +1358,7 @@ def _render_cost_hero(
         ("OpenAI project", lifetime_openai_billing.project_id or "None"),
         ("Billing start", lifetime_openai_billing.window_start_label or "Unavailable"),
         ("Last fetched", lifetime_openai_billing.fetched_at_label or "Unavailable"),
-        ("Data status", _cache_status(lifetime_openai_billing)),
+        ("Billing data", _cache_status(lifetime_openai_billing)),
         ("Tavily plan", f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"),
         ("Streamlit Cloud hosting", _format_currency(provider_spend.hosting_billed_usd)),
     ]
@@ -1444,8 +1444,8 @@ def _render_guided_steps(metrics: dict) -> None:
         ),
         _step_row(
             3,
-            "Review results",
-            "Review scored companies and exports.",
+            "View results",
+            "View scored companies and exports.",
             "Active" if stage == 3 else "Locked",
         ),
     ]
@@ -1845,7 +1845,7 @@ def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
             f"<div class='route-meta'>Positive: {_signal_pills(row.get('homepage_positive_signals'), 'Not captured')}</div>"
             f"<div class='route-meta'>Negative: {_signal_pills(row.get('homepage_negative_signals'), 'Not captured')}</div>"
             f"<div class='route-meta'>Source data confidence: {html.escape(_clean_ui_text(evidence_confidence))}</div>"
-            f"<div class='route-meta'>Status note: {html.escape(_clean_ui_text(row.get('homepage_route_reason') or row.get('evidence_summary') or 'No data-gap reason recorded.'))}</div>"
+            f"<div class='route-meta'>Page/search note: {html.escape(_clean_ui_text(row.get('homepage_route_reason') or row.get('evidence_summary') or 'No page/search note recorded.'))}</div>"
             "</div>"
             "</div>"
         )
@@ -1871,7 +1871,7 @@ def _source_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
             f"<div class='source-meta'>{_format_int(row.get('duplicate_count'))} source row{'s' if int(row.get('duplicate_count') or 0) != 1 else ''}</div>"
             "</div>"
             "<div class='source-score'>"
-            "<div class='prospect-score-label'>Screen score</div>"
+            "<div class='prospect-score-label'>Rule score</div>"
             "<div class='score-cell'>"
             "<div class='score-track'>"
             f"<span class='score-fill' style='width:{max(0, min(100, score))}%'></span>"
@@ -1989,7 +1989,7 @@ if st.session_state.pop("load_source_requested", False):
 if st.session_state.pop("start_paid_run_requested", False):
     cap = int(prospect_cap)
     active_verify_mode = st.session_state.get("active_verify_mode", verify_mode)
-    progress = st.progress(0, text=f"Refreshing source screening before verifying up to {cap:,} companies...")
+    progress = st.progress(0, text=f"Refreshing rule classifications before scoring up to {cap:,} companies...")
     preview = st.empty()
     classify_result = run_deterministic_classification(conn)
     progress.progress(0.05, text="Reading bounded homepage metadata before paid search...")
@@ -2143,22 +2143,22 @@ if pending_verify_run:
             ]
         )
     cascade_rows = [
-        ("API-eligible companies", _format_int(pending_verify_run.get("api_eligible_companies") or broad_universe_pending)),
+        ("Companies kept after rule filtering", _format_int(pending_verify_run.get("api_eligible_companies") or broad_universe_pending)),
         ("Homepages checked", _format_int(pending_verify_run.get("homepage_attempted") or 0)),
-        ("Metadata enough", _format_int(pending_verify_run.get("cached_homepage_ready") or 0)),
-        ("Ready from homepage", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
-        ("Queued for search", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
-        ("Missing data", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
+        ("Page data used for scoring", _format_int(pending_verify_run.get("cached_homepage_ready") or 0)),
+        ("Companies scored from page data", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
+        ("Companies sent to web search", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
+        ("Companies without enough page data", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
     ]
 
 slides = [
-    {"key": "overview", "label": "Overview", "title": "Manifest list to scored companies.", "copy": "Load company names, remove excluded categories, check company pages, run web search when page data is incomplete, then score the remaining companies."},
-    {"key": "source", "label": "Step 1", "title": "Prepare the Manifest list.", "copy": "Load attendee company names, merge duplicates, and remove rows that match excluded categories."},
+    {"key": "overview", "label": "Overview", "title": "Manifest list to scored companies.", "copy": "Load company names, remove excluded organization types and placeholder names, check company pages, run web search when page data is incomplete, then score the remaining companies."},
+    {"key": "source", "label": "Step 1", "title": "Prepare the Manifest list.", "copy": "Load attendee company names, merge duplicate company names, and remove rows that match excluded organization types."},
     {"key": "homepage", "label": "Step 2", "title": "Check company pages.", "copy": "Read domains, page titles, descriptions, headings, and short homepage text before web search."},
-    {"key": "estimate", "label": "Step 3", "title": "Approve the run.", "copy": "Review the batch size, search volume, scoring volume, runtime, tokens, and estimated cost."},
+    {"key": "estimate", "label": "Step 3", "title": "Approve the run.", "copy": "Check the batch size, search volume, scoring volume, runtime, tokens, and estimated cost."},
     {"key": "cost", "label": "Step 4", "title": "Track spend.", "copy": "View provider billing, included Tavily credits, and local token estimates separately."},
-    {"key": "prospects", "label": "Step 5", "title": "Review scored companies.", "copy": "Sort companies by total score and inspect the page text or search results used for scoring."},
-    {"key": "routing", "label": "Step 6", "title": "Review company data status.", "copy": "See which companies have usable page data and which companies need web search."},
+    {"key": "prospects", "label": "Step 5", "title": "View scored companies.", "copy": "Sort companies by total score and inspect the page text or search results used for scoring."},
+    {"key": "routing", "label": "Step 6", "title": "View company page and web search counts.", "copy": "See which companies were scored from company page data and which companies were sent to web search."},
 ]
 slide_count = len(slides)
 slide_index = int(st.session_state.get("slide_index", 0))
@@ -2181,12 +2181,12 @@ _render_slide_header(slide["label"], slide["title"], slide["copy"])
 if slide["key"] == "overview":
     _render_flow_steps(
         [
-            ("Source", "Load and deduplicate Manifest companies."),
-            ("Screen", "Remove incumbents, investors, associations, service firms, and noisy rows."),
+            ("Company names", "Load Manifest attendee company names and merge duplicate names."),
+            ("Remove rows", "Remove incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names."),
             ("Company page", "Read domains, titles, descriptions, and snippets."),
             ("Web search", "Use Tavily when company page data is incomplete."),
             ("Score", "Score each company against Wittington criteria."),
-            ("Review", "Show scored companies and spend."),
+            ("Results", "Show scored companies and provider spend."),
         ],
     )
 elif slide["key"] == "source":
@@ -2194,20 +2194,20 @@ elif slide["key"] == "source":
         [
             ("Raw rows", _format_int(metrics["raw_companies"])),
             ("Unique names", _format_int(metrics["unique_companies"])),
-            ("API-eligible", _format_int(candidate_count)),
+            ("Rows kept for page checks and search", _format_int(candidate_count)),
             ("Provider cost", "$0.0000"),
         ]
     )
     _render_summary_card(
-        "First screen",
+        "Rule processing",
         [
             ("Input", "Public Manifest attendee list"),
             ("Cleaned list", "Names normalized and duplicates merged"),
-            ("Removed", "Incumbents, investors, associations, consulting firms, agencies, service providers, and noisy rows"),
-            ("Remaining rows", f"{_format_int(candidate_count)} companies ready for page checks and search"),
+            ("Removed", "Incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names"),
+            ("Remaining rows", f"{_format_int(candidate_count)} companies will be checked with company pages or web search"),
         ],
     )
-    if workflow_stage == 1 and st.button("Load and screen Manifest list", type="primary", use_container_width=True):
+    if workflow_stage == 1 and st.button("Load Manifest list and apply rules", type="primary", use_container_width=True):
         st.session_state["load_source_requested"] = True
         st.rerun()
 elif slide["key"] == "homepage":
@@ -2215,8 +2215,8 @@ elif slide["key"] == "homepage":
         [
             ("Company pages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
             ("Page data used for scoring", _format_int(cascade_summary.get("score_from_homepage") or 0)),
-            ("Queued for search", _format_int(cascade_summary.get("needs_tavily") or 0)),
-            ("Missing data", _format_int(cascade_summary.get("data_gaps") or 0)),
+            ("Companies sent to web search", _format_int(cascade_summary.get("needs_tavily") or 0)),
+            ("Companies without enough page data", _format_int(cascade_summary.get("data_gaps") or 0)),
         ]
     )
     _render_summary_card(
@@ -2224,7 +2224,7 @@ elif slide["key"] == "homepage":
         [
             ("Reads", "Domains, page titles, descriptions, headings, and snippets"),
             ("Page data used for scoring", f"{_format_int(tavily_avoided)} companies"),
-            ("Next", "Companies with incomplete page data move to web search"),
+            ("Next", "Companies without enough page text are sent to web search"),
         ],
     )
     if pending_verify_run and st.button("Check one company page", type="primary", use_container_width=True):
@@ -2260,7 +2260,7 @@ elif slide["key"] == "estimate":
             ]
         )
         _render_summary_card("Run estimate", projected_rows)
-        _render_summary_card("Company page status", cascade_rows)
+        _render_summary_card("Company page and web search counts", cascade_rows)
         if st.button("Run search and scoring", type="primary", use_container_width=True):
             st.session_state["active_verify_mode"] = pending_mode
             st.session_state["start_paid_run_requested"] = True
@@ -2295,13 +2295,13 @@ elif slide["key"] == "prospects":
     )
 elif slide["key"] == "routing":
     _render_summary_card(
-        "Company data status",
+        "Company page and web search counts",
         [
-            ("API-eligible companies", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
+            ("Companies kept after rule filtering", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
             ("Company pages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
             ("Page data used for scoring", _format_int(cascade_summary.get("score_from_homepage") or 0)),
-            ("Queued for web search", _format_int(cascade_summary.get("needs_tavily") or 0)),
-            ("Missing data", _format_int(cascade_summary.get("data_gaps") or 0)),
+            ("Companies sent to web search", _format_int(cascade_summary.get("needs_tavily") or 0)),
+            ("Companies without enough page data", _format_int(cascade_summary.get("data_gaps") or 0)),
         ],
     )
 
