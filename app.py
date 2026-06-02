@@ -1137,23 +1137,27 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int) -> dict:
     )
 
     existing_tavily_credits = int(totals.get("tavily_calls") or 0)
+    included_tavily_credits = _setting(settings, "tavily_included_monthly_credits", 1000)
+    tavily_payg_price = _setting(settings, "tavily_payg_price_per_credit_usd", 0.008)
     tavily_before = calculate_tavily_billing(
         credits_used=existing_tavily_credits,
-        included_monthly_credits=_setting(settings, "tavily_included_monthly_credits", 1000),
+        included_monthly_credits=included_tavily_credits,
         pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", False),
-        payg_price_per_credit_usd=_setting(settings, "tavily_payg_price_per_credit_usd", 0.008),
+        payg_price_per_credit_usd=tavily_payg_price,
         plan_name=_setting(settings, "tavily_plan_name", "Researcher"),
         shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.001),
     )
     tavily_after = calculate_tavily_billing(
         credits_used=existing_tavily_credits + projected_tavily_calls,
-        included_monthly_credits=_setting(settings, "tavily_included_monthly_credits", 1000),
+        included_monthly_credits=included_tavily_credits,
         pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", False),
-        payg_price_per_credit_usd=_setting(settings, "tavily_payg_price_per_credit_usd", 0.008),
+        payg_price_per_credit_usd=tavily_payg_price,
         plan_name=_setting(settings, "tavily_plan_name", "Researcher"),
         shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.001),
     )
     projected_tavily_bill = max(0.0, tavily_after.actual_billed_usd - tavily_before.actual_billed_usd)
+    projected_tavily_overage = max(0, int(tavily_after.overage_credits) - int(tavily_before.overage_credits))
+    projected_tavily_payg_if_enabled = projected_tavily_overage * max(0.0, float(tavily_payg_price or 0.0))
     projected_total = projected_tavily_bill + projected_openai_estimate
 
     tavily_workers = max(1, min(_setting_int(settings, "tavily_concurrency", 12), max(1, projected_tavily_calls)))
@@ -1169,10 +1173,14 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int) -> dict:
         "high_signal_candidates": high_signal_candidates,
         "other_likely_tech_candidates": other_likely_tech_candidates,
         "ambiguous_candidates": ambiguous_candidates,
+        "broad_candidate_universe": int(metrics.get("candidates") or 0),
+        "unique_company_universe": int(metrics.get("unique_companies") or 0),
         "projected_prompt_tokens": projected_prompt_tokens,
         "projected_completion_tokens": projected_completion_tokens,
         "projected_openai_estimate": projected_openai_estimate,
         "projected_tavily_bill": projected_tavily_bill,
+        "projected_tavily_overage": projected_tavily_overage,
+        "projected_tavily_payg_if_enabled": projected_tavily_payg_if_enabled,
         "projected_total": projected_total,
         "tavily_credits_after": tavily_after.credits_used,
         "tavily_free_credits_remaining_after": tavily_after.free_credits_remaining,
@@ -1656,25 +1664,49 @@ if run_step == "source":
 
 pending_verify_run = st.session_state.get("pending_verify_run")
 if pending_verify_run and run_step != "source":
-    st.markdown("<div class='section-label'>Confirm API run</div>", unsafe_allow_html=True)
-    _render_summary_card(
-        "Projected usage before starting",
-        [
-            ("Batch cap", _format_int(pending_verify_run["cap"])),
-            ("Uncached Tavily calls", _format_int(pending_verify_run["projected_tavily_calls"])),
-            ("Projected OpenAI scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
+    high_signal_pending = int(pending_verify_run.get("high_signal_candidates") or 0)
+    likely_tech_pending = int(pending_verify_run.get("other_likely_tech_candidates") or 0)
+    ambiguous_pending = int(pending_verify_run.get("ambiguous_candidates") or 0)
+    broad_universe_pending = int(pending_verify_run.get("broad_candidate_universe") or metrics.get("candidates") or 0)
+    unique_universe_pending = int(pending_verify_run.get("unique_company_universe") or metrics.get("unique_companies") or 0)
+    projected_tavily_overage = int(pending_verify_run.get("projected_tavily_overage") or 0)
+    tavily_payg_enabled_pending = bool(pending_verify_run.get("tavily_payg_enabled"))
+    projected_rows = [
+        ("Batch cap", _format_int(pending_verify_run["cap"])),
+        (
+            "Candidate universe",
+            f"{_format_int(broad_universe_pending)} API-eligible of {_format_int(unique_universe_pending)} unique",
+        ),
+        ("Uncached Tavily calls", _format_int(pending_verify_run["projected_tavily_calls"])),
+        ("Projected OpenAI scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
+        (
+            "Candidate mix",
             (
-                "Candidate mix",
-                (
-                    f"{_format_int(pending_verify_run['high_signal_candidates'])} high-signal, "
-                    f"{_format_int(pending_verify_run['other_likely_tech_candidates'])} other likely-tech, "
-                    f"{_format_int(pending_verify_run['ambiguous_candidates'])} ambiguous"
-                ),
+                f"{_format_int(high_signal_pending)} high-signal, "
+                f"{_format_int(likely_tech_pending)} other likely-tech, "
+                f"{_format_int(ambiguous_pending)} ambiguous"
             ),
-            ("Projected input tokens", _format_int(pending_verify_run["projected_prompt_tokens"])),
-            ("Projected output tokens", _format_int(pending_verify_run["projected_completion_tokens"])),
-            ("Estimated OpenAI token-rate cost", _format_currency(pending_verify_run["projected_openai_estimate"])),
-            ("Estimated Tavily billed cost", _format_currency(pending_verify_run["projected_tavily_bill"])),
+        ),
+        ("Projected input tokens", _format_int(pending_verify_run["projected_prompt_tokens"])),
+        ("Projected output tokens", _format_int(pending_verify_run["projected_completion_tokens"])),
+        ("Estimated OpenAI token-rate cost", _format_currency(pending_verify_run["projected_openai_estimate"])),
+        ("Estimated Tavily billed cost", _format_currency(pending_verify_run["projected_tavily_bill"])),
+    ]
+    if projected_tavily_overage > 0 and not tavily_payg_enabled_pending:
+        projected_rows.append(
+            (
+                "Tavily over included credits",
+                f"{_format_int(projected_tavily_overage)} credits; pay-as-you-go off",
+            )
+        )
+        projected_rows.append(
+            (
+                "Tavily overage if enabled",
+                _format_currency(float(pending_verify_run.get("projected_tavily_payg_if_enabled") or 0.0)),
+            )
+        )
+    projected_rows.extend(
+        [
             ("Estimated total provider cost", _format_currency(pending_verify_run["projected_total"])),
             ("Estimated run time", _format_duration(int(pending_verify_run["estimated_seconds"]))),
             (
@@ -1685,8 +1717,13 @@ if pending_verify_run and run_step != "source":
                 "Tavily credits after run",
                 f"{_format_int(pending_verify_run['tavily_credits_after'])} used, {_format_int(pending_verify_run['tavily_free_credits_remaining_after'])} included credits remaining",
             ),
-            ("Tavily pay-as-you-go", "on" if pending_verify_run["tavily_payg_enabled"] else "off"),
-        ],
+            ("Tavily pay-as-you-go", "on" if tavily_payg_enabled_pending else "off"),
+        ]
+    )
+    st.markdown("<div class='section-label'>Confirm API run</div>", unsafe_allow_html=True)
+    _render_summary_card(
+        "Projected usage before starting",
+        projected_rows,
     )
     st.caption(
         "OpenAI cost is an internal token-rate estimate based on the selected model and recent usage. "

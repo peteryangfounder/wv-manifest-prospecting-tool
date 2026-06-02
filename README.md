@@ -152,7 +152,9 @@ The deterministic rules are intentionally inspectable. They make only hard, expl
 
 Rows with clear technology or Wittington-relevant signals run first. Examples of fast-lane signals include `AI`, `.ai`, robotics, software, SaaS, platform, automation, analytics, visibility, autonomous systems, optimization, TMS, WMS, machine learning, computer vision, warehouse automation, retail infrastructure, healthcare operations, climate, sustainability, carbon, and emissions.
 
-This is why the demo can be cost-effective without relying on a brittle keyword-only boundary. The app avoids paying Tavily and OpenAI to inspect obvious non-prospects, starts with rows most likely to contain technology companies, then keeps moving into ambiguous candidates within the approved batch cap. It reuses cached provider results and uses compact prompts with a low-cost OpenAI model. This is a ranked cost-control architecture, not an assertion that company names alone are enough to identify every investable startup.
+This is why the demo can be cost-effective without relying on a brittle keyword-only boundary. The deterministic name pass is used only for hard exclusions and ordering. It is not the final investment judgment. The app avoids paying Tavily and OpenAI to inspect obvious non-prospects, starts with rows most likely to contain technology companies, then keeps moving into ambiguous candidates within the approved batch cap. Tavily provides low-cost external web evidence, and OpenAI scores the compact evidence rather than the name alone. The app reuses cached provider results and uses compact prompts with a low-cost OpenAI model. This is a ranked cost-control architecture, not an assertion that company names alone are enough to identify every investable startup.
+
+At the current configured prices, a broad pass over all 2,444 API-eligible candidates is still designed to be plausible under a small testing budget when Tavily pay-as-you-go is explicitly enabled: the first 1,000 Tavily credits are included on the Researcher plan, 1,444 additional credits at `$0.008` would be about `$11.55`, and the default OpenAI token-rate estimate for compact `gpt-4o-mini` scoring is typically well below the remaining budget. The confirmation screen computes the actual projected calls, candidate mix, tokens, Tavily overage, pay-as-you-go status, and estimated provider cost before any paid provider calls begin.
 
 ## Billing And Usage Tracking
 
@@ -194,6 +196,7 @@ The app is designed to scale from a small demo batch to thousands of attendee ro
 - Transient provider failures use bounded retry/backoff with jitter.
 - Terminal provider failures fall back to recorded error state or baseline score instead of stopping the run.
 - The confirmation step estimates uncached calls, model tokens, OpenAI token-rate cost, Tavily billed cost, total provider cost, worker counts, credits after the run, and approximate runtime before provider calls start.
+- Broad recall runs can include ambiguous companies after high-signal rows; the confirmation card shows the candidate mix before execution.
 - Live billing reads through `OPENAI_ADMIN_KEY` are administrative reads and are not counted as model/token spend.
 
 The current Streamlit implementation runs verification synchronously after confirmation. A production deployment should move long runs into a resumable background job queue if pause, resume, cancellation, or multi-user scheduling are required.

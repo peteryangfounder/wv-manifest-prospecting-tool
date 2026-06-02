@@ -56,6 +56,8 @@ For very large campaigns, the system should evaluate whether OpenAI Batch API, e
 
 Future cheap-recall layers could include website-domain discovery, homepage metadata extraction, embeddings over company names and descriptions, low-cost classifier models, company database lookups, and stratified sampling of ambiguous rows. These layers would reduce the chance that a promising company with a generic name is missed by the first deterministic pass.
 
+The next major product improvement would be a free or near-free web-metadata pass before Tavily. For example, the app could discover likely domains from search result pages, fetch company homepages directly, parse titles/meta descriptions/schema.org data, and use that text to rank ambiguous companies before paid enrichment. That would add recall without sending every row immediately to an LLM.
+
 ## Cost Governance
 
 The current app already separates live OpenAI project billing, recent billing, internal token-rate estimates, Tavily included credits, Tavily billed spend, and Streamlit Cloud hosting. Production cost governance should add account-level budgets, campaign-level budgets, per-provider budgets, approval thresholds, and audit history.
