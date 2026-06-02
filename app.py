@@ -163,7 +163,7 @@ CUSTOM_CSS = """
     background: #ffffff;
   }
   .block-container {
-    max-width: 980px;
+    max-width: 760px;
     padding-top: 1.1rem;
     padding-bottom: 2rem;
   }
@@ -294,15 +294,15 @@ CUSTOM_CSS = """
   }
   .flow-grid {
     display: grid;
-    gap: 0;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    margin: 1rem 0 0.6rem 0;
+    gap: 0.75rem;
+    grid-template-columns: 1fr;
+    margin: 0.9rem 0 0.8rem 0;
   }
   .flow-step {
     background: #ffffff;
-    border-top: 2px solid #d9dee7;
+    border-left: 2px solid #d9dee7;
     min-width: 0;
-    padding: 0.95rem 0.55rem 0 0;
+    padding: 0 0 0.7rem 1.15rem;
     position: relative;
   }
   .flow-step::before {
@@ -311,13 +311,13 @@ CUSTOM_CSS = """
     border-radius: 999px;
     content: "";
     height: 0.72rem;
-    left: 0;
+    left: -0.43rem;
     position: absolute;
-    top: -0.43rem;
+    top: 0.05rem;
     width: 0.72rem;
   }
   .flow-step:first-child {
-    border-top-color: #2f6b5b;
+    border-left-color: #2f6b5b;
   }
   .flow-number {
     color: var(--wv-accent);
@@ -367,28 +367,49 @@ CUSTOM_CSS = """
   }
   .mini-metric-grid {
     display: grid;
-    gap: 0.65rem;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    margin: 0.75rem 0 0.85rem 0;
+    gap: 0;
+    grid-template-columns: 1fr;
+    margin: 0.8rem 0 0.95rem 0;
   }
   .mini-metric {
     background: #ffffff;
-    border: 1px solid var(--wv-line);
-    border-radius: 8px;
-    box-shadow: 0 8px 20px rgba(31, 36, 51, 0.035);
-    padding: 0.75rem;
+    border-top: 1px solid #edf0f4;
+    padding: 0.78rem 0;
   }
   .mini-metric-label {
     color: #697386;
-    font-size: 0.78rem;
+    font-size: 0.82rem;
+    font-weight: 700;
     line-height: 1.3;
   }
   .mini-metric-value {
     color: #202332;
-    font-size: 1.25rem;
+    font-size: 1.45rem;
     font-weight: 780;
     line-height: 1.2;
-    margin-top: 0.15rem;
+    margin-top: 0.12rem;
+  }
+  .guided-fact-stack {
+    border-top: 1px solid #edf0f4;
+    margin: 0.75rem 0 1rem 0;
+  }
+  .guided-fact {
+    border-bottom: 1px solid #edf0f4;
+    padding: 0.9rem 0;
+  }
+  .guided-fact-label {
+    color: #697386;
+    font-size: 0.82rem;
+    font-weight: 720;
+    line-height: 1.3;
+  }
+  .guided-fact-value {
+    color: #202332;
+    font-size: 1.15rem;
+    font-weight: 780;
+    line-height: 1.35;
+    margin-top: 0.18rem;
+    overflow-wrap: anywhere;
   }
   .step-list {
     display: grid;
@@ -489,52 +510,55 @@ CUSTOM_CSS = """
   }
   .cost-hero {
     background: #ffffff;
-    border: 1px solid var(--wv-line);
-    border-radius: 8px;
+    border-top: 1px solid #edf0f4;
     margin: 0.8rem 0;
-    padding: 0.95rem;
+    padding: 0.9rem 0 0 0;
   }
   .cost-hero-title {
     color: #202332;
     font-size: 0.9rem;
     font-weight: 760;
-    margin-bottom: 0.65rem;
+    margin-bottom: 0.3rem;
     text-transform: uppercase;
   }
   .cost-hero-grid {
     display: grid;
-    gap: 0.8rem;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    grid-template-columns: 1fr;
   }
   .cost-hero-label {
     color: #697386;
     font-size: 0.82rem;
+    font-weight: 700;
     line-height: 1.35;
+    margin-top: 0.75rem;
   }
   .cost-hero-value {
     color: #202332;
-    font-size: 1.35rem;
+    font-size: 1.45rem;
     font-weight: 780;
     line-height: 1.2;
     margin-top: 0.18rem;
     overflow-wrap: anywhere;
   }
   .cost-hero-value.compact {
-    font-size: 1.16rem;
-    white-space: nowrap;
+    font-size: 1.15rem;
+    white-space: normal;
   }
   .billing-detail-grid {
     border-top: 1px solid #edf0f4;
     display: grid;
-    gap: 0.55rem 1rem;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+    grid-template-columns: 1fr;
     margin-top: 1rem;
-    padding-top: 0.85rem;
+    padding-top: 0.2rem;
   }
   .billing-detail-label {
     color: #697386;
     font-size: 0.78rem;
+    font-weight: 700;
     line-height: 1.3;
+    margin-top: 0.65rem;
   }
   .billing-detail-value {
     color: #202332;
@@ -552,43 +576,45 @@ CUSTOM_CSS = """
   }
   .summary-card {
     background: #ffffff;
-    border: 1px solid var(--wv-line);
-    border-radius: 8px;
-    margin-top: 0.75rem;
-    padding: 0.85rem 0.95rem;
+    border-top: 1px solid #edf0f4;
+    margin-top: 0.9rem;
+    padding: 0.85rem 0 0 0;
   }
   .summary-title {
     color: #202332;
-    font-size: 0.92rem;
+    font-size: 1rem;
     font-weight: 760;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.25rem;
   }
   .summary-line {
-    align-items: baseline;
-    display: flex;
-    justify-content: space-between;
-    gap: 1rem;
-    padding: 0.32rem 0;
+    border-top: 1px solid #edf0f4;
+    display: block;
+    padding: 0.75rem 0;
   }
   .summary-label {
     color: #697386;
-    font-size: 0.86rem;
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 700;
+    line-height: 1.3;
   }
   .summary-value {
     color: var(--wv-ink);
-    font-size: 0.94rem;
+    display: block;
+    font-size: 1rem;
     font-weight: 740;
-    text-align: right;
+    line-height: 1.4;
+    margin-top: 0.16rem;
+    text-align: left;
   }
   .status-strip {
-    background: #f6f8fb;
-    border: 1px solid #e5e9ef;
-    border-left: 4px solid #2f6fed;
-    border-radius: 8px;
+    background: #ffffff;
+    border-left: 3px solid #2f6fed;
     color: #313647;
-    font-size: 0.92rem;
-    margin: 0.65rem 0 1.1rem 0;
-    padding: 0.72rem 0.9rem;
+    font-size: 0.84rem;
+    line-height: 1.4;
+    margin: 0.25rem 0 0.9rem 0;
+    padding: 0.25rem 0 0.25rem 0.65rem;
   }
   .status-strip.success {
     border-left-color: #12823b;
@@ -877,18 +903,8 @@ CUSTOM_CSS = """
     margin-top: 0.45rem;
   }
   @media (max-width: 1100px) {
-    .flow-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      row-gap: 1.05rem;
-    }
     .summary-grid {
       grid-template-columns: 1fr;
-    }
-    .cost-hero-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    .billing-detail-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .prospect-card {
       grid-template-columns: minmax(12rem, 1fr) minmax(8rem, 0.7fr);
@@ -902,25 +918,8 @@ CUSTOM_CSS = """
     .route-grid {
       grid-template-columns: 1fr;
     }
-    .mini-metric-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
   }
   @media (max-width: 760px) {
-    .flow-grid {
-      grid-template-columns: 1fr;
-      gap: 0.75rem;
-      margin-top: 0.8rem;
-    }
-    .flow-step {
-      border-left: 2px solid #d9dee7;
-      border-top: 0;
-      padding: 0 0 0.9rem 1.15rem;
-    }
-    .flow-step::before {
-      left: -0.43rem;
-      top: 0.05rem;
-    }
     .step-row {
       grid-template-columns: 2rem 1fr;
     }
@@ -939,12 +938,6 @@ CUSTOM_CSS = """
     .source-table td:nth-child(7) {
       display: none;
     }
-    .cost-hero-grid {
-      grid-template-columns: 1fr;
-    }
-    .billing-detail-grid {
-      grid-template-columns: 1fr;
-    }
     .prospect-card {
       grid-template-columns: 1fr;
     }
@@ -956,9 +949,6 @@ CUSTOM_CSS = """
     }
     .source-score {
       grid-column: auto;
-    }
-    .mini-metric-grid {
-      grid-template-columns: 1fr;
     }
   }
 </style>
@@ -2304,27 +2294,18 @@ elif slide["key"] == "prospects":
         "No AI-scored prospects yet. Run the homepage-to-search pipeline first.",
     )
 elif slide["key"] == "routing":
-    cols = st.columns((1, 1))
-    with cols[0]:
-        _render_summary_card(
-            "Cascade counts",
-            [
-                ("API-eligible", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
-                ("Homepages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
-                ("Metadata enough", _format_int(cascade_summary.get("score_from_homepage") or 0)),
-                ("Needs search", _format_int(cascade_summary.get("needs_tavily") or 0)),
-                ("Data gaps", _format_int(cascade_summary.get("data_gaps") or 0)),
-            ],
-        )
-    with cols[1]:
-        _render_summary_card(
-            "Cost saved",
-            [
-                ("Search calls avoided", _format_int(tavily_avoided)),
-                ("Search credits saved", _format_int(tavily_avoided)),
-                ("Estimated search cost saved", _format_currency(tavily_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0))),
-            ],
-        )
+    _render_summary_card(
+        "Homepage-to-search path",
+        [
+            ("API-eligible companies", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
+            ("Homepages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
+            ("Metadata enough to skip search", _format_int(cascade_summary.get("score_from_homepage") or 0)),
+            ("Still needs paid search", _format_int(cascade_summary.get("needs_tavily") or 0)),
+            ("Data gaps", _format_int(cascade_summary.get("data_gaps") or 0)),
+            ("Search calls avoided", _format_int(tavily_avoided)),
+            ("Estimated search cost saved", _format_currency(tavily_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0))),
+        ],
+    )
 
 nav_cols = st.columns((1, 1, 1))
 if nav_cols[0].button("Previous", disabled=slide_index == 0, use_container_width=True):
