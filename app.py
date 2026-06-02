@@ -371,6 +371,48 @@ CUSTOM_CSS = """
     line-height: 1.42;
     margin-top: 0.28rem;
   }
+  .phase-panel {
+    border: 1px solid #dfe5ee;
+    border-left-width: 4px;
+    border-radius: 8px;
+    margin: 0.85rem 0 1rem 0;
+    padding: 0.9rem 0.95rem;
+  }
+  .phase-panel.before {
+    background: #f8fafc;
+    border-left-color: #64748b;
+  }
+  .phase-panel.after {
+    background: #f3fbf7;
+    border-left-color: #1f6f5b;
+  }
+  .phase-label {
+    font-size: 0.72rem;
+    font-weight: 820;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    margin-bottom: 0.35rem;
+    text-transform: uppercase;
+  }
+  .phase-panel.before .phase-label {
+    color: #475569;
+  }
+  .phase-panel.after .phase-label {
+    color: #1f6f5b;
+  }
+  .phase-title {
+    color: var(--wv-ink);
+    font-size: 0.98rem;
+    font-weight: 780;
+    line-height: 1.3;
+    margin-bottom: 0.25rem;
+  }
+  .phase-copy {
+    color: var(--wv-muted);
+    font-size: 0.84rem;
+    line-height: 1.42;
+    margin: 0;
+  }
   .mini-metric-grid {
     display: grid;
     gap: 0;
@@ -1312,6 +1354,19 @@ def _render_summary_card(title: str, rows: list[tuple[str, str]]) -> None:
         )
     body.append("</div>")
     st.markdown("".join(body), unsafe_allow_html=True)
+
+
+def _render_phase_panel(kind: str, title: str, copy: str) -> None:
+    safe_kind = "after" if kind == "after" else "before"
+    label = "After operation" if safe_kind == "after" else "Before operation"
+    st.markdown(
+        f"<div class='phase-panel {safe_kind}'>"
+        f"<div class='phase-label'>{label}</div>"
+        f"<div class='phase-title'>{html.escape(_clean_ui_text(title))}</div>"
+        f"<p class='phase-copy'>{html.escape(_clean_ui_text(copy))}</p>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _render_next_step(label: str, title: str, copy: str) -> None:
@@ -2539,6 +2594,11 @@ if slide["key"] == "overview":
         ],
     )
 elif slide["key"] == "source":
+    _render_phase_panel(
+        "before",
+        "Input source",
+        "The app starts from the public Manifest attendee list and saves the raw attendee-company rows.",
+    )
     _render_mini_metrics(
         [
             (
@@ -2554,16 +2614,23 @@ elif slide["key"] == "source":
         ]
     )
     _render_summary_card(
-        "Manifest list load",
+        "Manifest list load result",
         [
             ("Input", "Public Manifest attendee list"),
             ("Saved rows", f"{_format_int(raw_manifest_row_count)} raw attendee-company rows"),
         ],
     )
+    if raw_manifest_row_count > 0:
+        _render_phase_panel("after", "Loaded rows are saved", f"{_format_int(raw_manifest_row_count)} raw attendee-company rows are available for normalization.")
     if workflow_stage == 1 and st.button("Load Manifest list", type="primary", use_container_width=True, key="load_manifest_inline"):
         st.session_state["load_manifest_requested"] = True
         st.rerun()
 elif slide["key"] == "normalize":
+    _render_phase_panel(
+        "before",
+        "Raw rows need canonical company names",
+        "This step merges repeated attendee-company text into one normalized company record per company.",
+    )
     _render_mini_metrics(
         [
             (
@@ -2588,7 +2655,7 @@ elif slide["key"] == "normalize":
         ]
     )
     _render_summary_card(
-        "Company name normalization",
+        "Company name normalization result",
         [
             ("Input", f"{_format_int(raw_manifest_row_count)} raw attendee-company rows"),
             (
@@ -2597,12 +2664,19 @@ elif slide["key"] == "normalize":
             ),
         ],
     )
+    if unique_company_count > 0:
+        _render_phase_panel("after", "Company names are normalized", f"{_format_int(unique_company_count)} unique company names are ready for exclusion rules.")
     if workflow_stage == 1:
         st.warning("Load the Manifest list before normalizing company names.")
     elif workflow_stage == 2 and st.button("Normalize company names", type="primary", use_container_width=True, key="normalize_manifest_inline"):
         st.session_state["normalize_manifest_requested"] = True
         st.rerun()
 elif slide["key"] == "exclusions":
+    _render_phase_panel(
+        "before",
+        "Remove companies that are not venture prospects",
+        "This rule pass removes obvious non-targets before any page checks, Tavily calls, or OpenAI scoring.",
+    )
     _render_mini_metrics(
         [
             (
@@ -2627,7 +2701,7 @@ elif slide["key"] == "exclusions":
         ]
     )
     _render_summary_card(
-        "Excluded row criteria",
+        "Exclusion result",
         [
             ("Removed", "Incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names"),
             (
@@ -2638,6 +2712,8 @@ elif slide["key"] == "exclusions":
             ),
         ],
     )
+    if exclusions_applied:
+        _render_phase_panel("after", "Candidate set is ready", f"{_format_int(candidate_count)} companies remain after exclusions.")
     if workflow_stage == 1:
         st.warning("Load the Manifest list before removing excluded rows.")
     elif workflow_stage == 2:
@@ -2646,6 +2722,11 @@ elif slide["key"] == "exclusions":
         st.session_state["prepare_manifest_requested"] = True
         st.rerun()
 elif slide["key"] == "homepage":
+    _render_phase_panel(
+        "before",
+        "Choose the batch for page checks",
+        "The page check reads homepage metadata first, so companies with enough page data can avoid a Tavily web-search call.",
+    )
     if workflow_stage >= 4:
         prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
         pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode)
@@ -2672,6 +2753,11 @@ elif slide["key"] == "homepage":
         st.rerun()
 
     if homepage_checked > 0:
+        _render_phase_panel(
+            "after",
+            "Page-check routing is available",
+            "The checked companies are now split between page-data scoring and web-search routing.",
+        )
         _render_mini_metrics(
             [
                 (
@@ -2694,6 +2780,11 @@ elif slide["key"] == "homepage":
     else:
         st.info("No company pages checked yet. Choose the batch size, then run the page check.")
 elif slide["key"] == "estimate":
+    _render_phase_panel(
+        "before",
+        "Review the selected run before paid API work",
+        "This step estimates web-search calls, OpenAI scoring calls, runtime, tokens, and cost for the selected batch.",
+    )
     if pending_verify_run:
         prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
         homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
@@ -2732,6 +2823,11 @@ elif slide["key"] == "estimate":
                 st.rerun()
 
         if int(metrics.get("openai_scored") or 0) > 0:
+            _render_phase_panel(
+                "after",
+                "Search and scoring results are available",
+                "The run has saved scored companies, provider-call counts, token usage, and local cost estimates.",
+            )
             _render_summary_card(
                 "Current search and scoring result",
                 [
