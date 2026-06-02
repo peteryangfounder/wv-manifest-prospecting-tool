@@ -8,8 +8,8 @@ Hosted app: https://wv-manifest-prospecting-tool-b8jadagmhgsh8wirbknjb9.streamli
 
 ## Current App
 
-- Focused Streamlit workflow built around the investor narrative: Manifest list, first screen, homepage evidence, search enrichment, AI scoring, ranked prospects.
-- Pipeline section that shows exactly how the source list narrows at each stage.
+- Slide-style Streamlit onboarding flow built around the investor narrative: Manifest list, first screen, homepage evidence, search enrichment, AI scoring, ranked prospects.
+- One focused idea per screen, with previous/next navigation and progress shown at the top.
 - Ranked prospect cards backed by source URLs, evidence snippets, confidence, and route reasons.
 - Cost and usage section that separates live provider billing, included Tavily credits, Streamlit Community Cloud hosting, and internal token-rate estimates.
 - Wittington project lifetime-to-date OpenAI billing, recent OpenAI billing, last fetch time, cache status, and billing-window metadata.
@@ -80,12 +80,14 @@ streamlit run app.py
 
 Use the dashboard in this order:
 
-1. Click **Load and screen Manifest list**.
-2. Review the **Pipeline** section to see how the raw Manifest list narrows into API-eligible companies.
-3. Review the automatically displayed run estimate: companies, Tavily search calls, OpenAI scoring calls, estimated provider cost, runtime, and tokens.
-4. Click **Preview homepage evidence - no paid APIs** to show the low-cost homepage/domain layer before paid search.
+Use the app like a short onboarding deck:
+
+1. Move through the slides with **Next** and **Previous**.
+2. On **Step 1**, click **Load and screen Manifest list**.
+3. On **Step 2**, click **Preview homepage evidence - no paid APIs** to show the low-cost homepage/domain layer before paid search.
+4. On **Step 3**, review companies, Tavily search calls, OpenAI scoring calls, estimated provider cost, runtime, and tokens.
 5. Click **Confirm paid search and AI run** only after the estimate is acceptable.
-6. Review **Ranked prospects**, **Cost and usage**, and **Evidence routing**.
+6. Continue through the cost, ranked prospects, and evidence-routing slides.
 
 For a command-line run:
 

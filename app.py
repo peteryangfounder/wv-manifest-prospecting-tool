@@ -211,6 +211,45 @@ CUSTOM_CSS = """
     margin: 0.35rem 0 0.85rem 0;
     max-width: 760px;
   }
+  .slide-shell {
+    background: #ffffff;
+    border: 1px solid #dfe5ee;
+    border-radius: 10px;
+    margin: 0.8rem 0 1rem 0;
+    min-height: 470px;
+    padding: 1.1rem;
+  }
+  .slide-label {
+    color: #697386;
+    font-size: 0.78rem;
+    font-weight: 760;
+    text-transform: uppercase;
+  }
+  .slide-title {
+    color: #202332;
+    font-size: 1.55rem;
+    font-weight: 780;
+    line-height: 1.2;
+    margin-top: 0.18rem;
+  }
+  .slide-copy {
+    color: #5d6675;
+    font-size: 0.98rem;
+    line-height: 1.45;
+    margin: 0.4rem 0 0.9rem 0;
+    max-width: 820px;
+  }
+  .slide-progress-label {
+    color: #697386;
+    font-size: 0.82rem;
+    font-weight: 680;
+    margin-top: 0.3rem;
+  }
+  .slide-nav-note {
+    color: #8b94a5;
+    font-size: 0.78rem;
+    text-align: center;
+  }
   .next-step-card {
     background: #ffffff;
     border: 1px solid #dfe5ee;
@@ -1775,39 +1814,7 @@ source_rows_shown = 30
 simple_demo_view = True
 demo_safe_mode = False
 weights = dict(DEFAULT_WEIGHTS)
-
-st.markdown(
-    """
-    <div class="wv-header">
-      <h1 class="wv-title">Manifest Prospecting Tool</h1>
-      <p class="wv-subtitle">Screen Manifest companies with evidence, targeted search, AI scoring, and clear cost tracking.</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
 workflow_stage = _workflow_stage(metrics)
-
-st.markdown("<div class='guided-kicker'>Guided workflow</div>", unsafe_allow_html=True)
-if workflow_stage == 1:
-    st.markdown("<div class='guided-title'>Step 1: Prepare the source list</div>", unsafe_allow_html=True)
-    st.markdown(
-        "<div class='guided-copy'>Load the Manifest list, clean company names, remove duplicates, and screen out obvious non-prospects.</div>",
-        unsafe_allow_html=True,
-    )
-elif workflow_stage == 2:
-    st.markdown("<div class='guided-title'>Step 2: Build the evidence cascade</div>", unsafe_allow_html=True)
-    st.markdown(
-        "<div class='guided-copy'>Gather cheap homepage evidence first, then pay for search and AI only where the evidence is missing or promising.</div>",
-        unsafe_allow_html=True,
-    )
-else:
-    st.markdown("<div class='guided-title'>Step 3: Review verified prospects</div>", unsafe_allow_html=True)
-    st.markdown(
-        "<div class='guided-copy'>Review the ranked companies, the evidence behind each rank, and the actual provider spend.</div>",
-        unsafe_allow_html=True,
-    )
-_render_guided_steps(metrics)
 
 selected_model = st.session_state.get("selected_openai_model", settings.openai_model)
 if selected_model not in OPENAI_MODEL_PRESETS:
@@ -1819,14 +1826,7 @@ model_pricing = _selected_model_pricing(selected_model)
 prospect_cap = int(st.session_state.get("prospect_cap", min(settings.max_score, 100)))
 runtime_settings = _settings_for_run(settings, selected_model, model_pricing["input"], model_pricing["output"])
 
-run_step = None
-pending_verify_run = None
-if workflow_stage == 1 and st.button("Load and screen Manifest list", type="primary", use_container_width=True):
-    run_step = "source"
-elif workflow_stage >= 2:
-    pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode)
-
-if run_step == "source":
+if st.session_state.pop("load_source_requested", False):
     load_result = _run_and_store("Loading attendee names...", lambda: load_attendees(conn, settings))
     classify_result = _run_and_store("Classifying source data...", lambda: run_deterministic_classification(conn))
     st.session_state["last_action"] = {
@@ -1836,88 +1836,7 @@ if run_step == "source":
     frame, metrics = _load_frame_and_metrics(conn)
     st.rerun()
 
-if pending_verify_run and run_step != "source":
-    pending_mode = pending_verify_run.get("mode") or "balanced"
-    broad_universe_pending = int(pending_verify_run.get("broad_candidate_universe") or metrics.get("candidates") or 0)
-    unique_universe_pending = int(pending_verify_run.get("unique_company_universe") or metrics.get("unique_companies") or 0)
-    projected_tavily_overage = int(pending_verify_run.get("projected_tavily_overage") or 0)
-    tavily_payg_enabled_pending = bool(pending_verify_run.get("tavily_payg_enabled"))
-    projected_rows = [
-        ("Companies in this run", _format_int(pending_verify_run["cap"])),
-        ("Candidate universe", f"{_format_int(broad_universe_pending)} of {_format_int(unique_universe_pending)} unique names"),
-        ("Search calls", _format_int(pending_verify_run["projected_tavily_calls"])),
-        ("AI scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
-        ("OpenAI tokens", f"{_format_int(pending_verify_run['projected_prompt_tokens'])} input, {_format_int(pending_verify_run['projected_completion_tokens'])} output"),
-        ("Estimated provider cost", _format_currency(pending_verify_run["projected_total"])),
-        ("Estimated run time", _format_duration(int(pending_verify_run["estimated_seconds"]))),
-    ]
-    if projected_tavily_overage > 0 and not tavily_payg_enabled_pending:
-        projected_rows.append(
-            (
-                "Search credits over included plan",
-                f"{_format_int(projected_tavily_overage)} credits; pay-as-you-go off",
-            )
-        )
-        projected_rows.append(
-            (
-                "Search overage if enabled",
-                _format_currency(float(pending_verify_run.get("projected_tavily_payg_if_enabled") or 0.0)),
-            )
-        )
-    cascade_rows = [
-        ("API-eligible companies", _format_int(pending_verify_run.get("api_eligible_companies") or broad_universe_pending)),
-        ("Homepage evidence attempted", _format_int(pending_verify_run.get("homepage_attempted") or 0)),
-        ("Homepage-positive companies", _format_int(pending_verify_run.get("cached_homepage_ready") or 0)),
-        ("Search calls avoided", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
-        ("Needs search", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
-        ("Data gaps", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
-    ]
-    st.markdown("<div class='section-label'>Run estimate</div>", unsafe_allow_html=True)
-    _render_mini_metrics(
-        [
-            ("Companies", _format_int(pending_verify_run["cap"])),
-            ("Search calls", _format_int(pending_verify_run["projected_tavily_calls"])),
-            ("AI calls", _format_int(pending_verify_run["projected_openai_calls"])),
-            ("Estimated cost", _format_currency(pending_verify_run["projected_total"])),
-        ]
-    )
-    _render_summary_card("Before paid calls", projected_rows)
-    _render_summary_card("Evidence routing", cascade_rows)
-    if st.button("Preview homepage evidence - no paid APIs", use_container_width=True):
-        with st.spinner("Collecting bounded homepage/domain evidence without paid provider calls..."):
-            run_deterministic_classification(conn)
-            preview_cap = max(1, min(int(pending_verify_run["cap"]), _setting_int(runtime_settings, "homepage_preview_max_per_click", 1)))
-            preview_settings = replace(
-                runtime_settings,
-                homepage_evidence_max_per_run=preview_cap,
-                homepage_fetch_timeout_seconds=min(float(_setting(runtime_settings, "homepage_fetch_timeout_seconds", 4.0) or 4.0), 1.0),
-            )
-            preview_result = collect_homepage_evidence(
-                conn,
-                preview_settings,
-                preview_cap,
-                False,
-                mode=pending_mode,
-                max_domain_attempts=1,
-            )
-        st.session_state["last_action"] = {
-            "message": (
-                f"Homepage preview checked {_format_int(preview_result.counts.get('processed'))} sample companies. "
-                "No Tavily or OpenAI calls were made."
-            ),
-            "level": "success",
-        }
-        st.session_state["pending_verify_run"] = _estimate_verify_run(
-            conn, db.metrics(conn), runtime_settings, int(pending_verify_run["cap"]), pending_mode
-        )
-        st.rerun()
-
-    if st.button("Confirm paid search and AI run", type="primary", use_container_width=True):
-        st.session_state["active_verify_mode"] = pending_mode
-        run_step = "verify"
-        st.session_state.pop("pending_verify_run", None)
-
-if run_step == "verify":
+if st.session_state.pop("start_paid_run_requested", False):
     cap = int(prospect_cap)
     active_verify_mode = st.session_state.get("active_verify_mode", verify_mode)
     progress = st.progress(0, text=f"Refreshing source screening before verifying up to {cap:,} companies...")
@@ -2048,88 +1967,223 @@ last_run_local_openai_estimate = _last_run_local_openai_estimate_usd(last_run)
 cascade_summary = db.homepage_evidence_summary(conn, mode=verify_mode) if not frame.empty else {}
 tavily_avoided = int(cascade_summary.get("score_from_homepage") or 0)
 
-st.markdown("<div class='section-label'>Pipeline</div>", unsafe_allow_html=True)
-_render_mini_metrics(
-    [
-        ("Manifest names", _format_int(metrics["unique_companies"])),
-        ("After first screen", _format_int(candidate_count)),
-        ("Homepage checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
-        ("AI-scored", _format_int(metrics["openai_scored"])),
+pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode) if workflow_stage >= 2 else None
+pending_mode = pending_verify_run.get("mode") if pending_verify_run else verify_mode
+broad_universe_pending = int((pending_verify_run or {}).get("broad_candidate_universe") or metrics.get("candidates") or 0)
+unique_universe_pending = int((pending_verify_run or {}).get("unique_company_universe") or metrics.get("unique_companies") or 0)
+projected_tavily_overage = int((pending_verify_run or {}).get("projected_tavily_overage") or 0)
+tavily_payg_enabled_pending = bool((pending_verify_run or {}).get("tavily_payg_enabled"))
+projected_rows = []
+cascade_rows = []
+if pending_verify_run:
+    projected_rows = [
+        ("Companies in this run", _format_int(pending_verify_run["cap"])),
+        ("Candidate universe", f"{_format_int(broad_universe_pending)} of {_format_int(unique_universe_pending)} unique names"),
+        ("Search calls", _format_int(pending_verify_run["projected_tavily_calls"])),
+        ("AI scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
+        ("OpenAI tokens", f"{_format_int(pending_verify_run['projected_prompt_tokens'])} input, {_format_int(pending_verify_run['projected_completion_tokens'])} output"),
+        ("Estimated provider cost", _format_currency(pending_verify_run["projected_total"])),
+        ("Estimated run time", _format_duration(int(pending_verify_run["estimated_seconds"]))),
     ]
-)
-_render_summary_card(
-    "How the list narrows",
-    [
-        ("1. Manifest list", f"{_format_int(metrics['raw_companies'])} rows, {_format_int(metrics['unique_companies'])} unique company names"),
-        ("2. First screen", f"{_format_int(candidate_count)} API-eligible companies after removing obvious non-prospects"),
-        ("3. Homepage evidence", f"{_format_int(cascade_summary.get('homepage_attempted') or 0)} checked, {_format_int(cascade_summary.get('score_from_homepage') or 0)} had enough evidence without paid search"),
-        ("4. Search enrichment", f"{_format_int(cascade_summary.get('needs_tavily') or 0)} still need Tavily because homepage evidence is missing or unclear"),
-        ("5. AI scoring", f"{_format_int(metrics['openai_scored'])} companies scored from evidence packets"),
-    ],
-)
-
-st.markdown("<div class='section-label'>Cost and usage</div>", unsafe_allow_html=True)
-_render_mini_metrics(
-    [
-        ("Actual billed cost", _format_billed_total(provider_spend)),
-        ("OpenAI tokens", _format_int(int(run_totals.get("total_tokens") or 0))),
-        ("Search credits used", _format_int(tavily_billing.credits_used)),
-        ("Search calls avoided", _format_int(tavily_avoided)),
+    if projected_tavily_overage > 0 and not tavily_payg_enabled_pending:
+        projected_rows.extend(
+            [
+                ("Search credits over included plan", f"{_format_int(projected_tavily_overage)} credits, pay-as-you-go off"),
+                ("Search overage if enabled", _format_currency(float(pending_verify_run.get("projected_tavily_payg_if_enabled") or 0.0))),
+            ]
+        )
+    cascade_rows = [
+        ("API-eligible companies", _format_int(pending_verify_run.get("api_eligible_companies") or broad_universe_pending)),
+        ("Homepage evidence attempted", _format_int(pending_verify_run.get("homepage_attempted") or 0)),
+        ("Homepage-positive companies", _format_int(pending_verify_run.get("cached_homepage_ready") or 0)),
+        ("Search calls avoided", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
+        ("Needs search", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
+        ("Data gaps", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
     ]
+
+slides = [
+    {"key": "overview", "label": "Overview", "title": "The app teaches one pipeline, one step at a time.", "copy": "Manifest list -> first screen -> homepage evidence -> paid search -> AI scoring -> ranked prospects -> cost reporting."},
+    {"key": "source", "label": "Step 1", "title": "Start with the raw Manifest list.", "copy": "Load the attendee file, normalize company names, deduplicate rows, and remove obvious non-prospects before any paid APIs."},
+    {"key": "homepage", "label": "Step 2", "title": "Use cheap homepage evidence first.", "copy": "The app attempts bounded homepage/domain evidence before Tavily so companies are not judged from names alone."},
+    {"key": "estimate", "label": "Step 3", "title": "Confirm spend before paid search and AI.", "copy": "Before provider calls start, the app shows projected search calls, OpenAI scoring calls, tokens, runtime, and provider cost."},
+    {"key": "cost", "label": "Step 4", "title": "Track actual cost and resource use.", "copy": "The billing view separates live provider-billed cost from internal token-rate estimates and included Tavily credits."},
+    {"key": "prospects", "label": "Step 5", "title": "Review ranked prospects.", "copy": "Prospect cards show score, supporting evidence, source, signals, and uncertainty."},
+    {"key": "routing", "label": "Step 6", "title": "See what the evidence cascade saved.", "copy": "The final screen shows homepage evidence coverage, rows that still need search, data gaps, and search calls avoided."},
+]
+slide_count = len(slides)
+slide_index = int(st.session_state.get("slide_index", 0))
+slide_index = max(0, min(slide_index, slide_count - 1))
+st.session_state["slide_index"] = slide_index
+slide = slides[slide_index]
+
+st.markdown(
+    """
+    <div class="wv-header">
+      <h1 class="wv-title">Manifest Prospecting Tool</h1>
+      <p class="wv-subtitle">A slide-by-slide walkthrough of the sourcing pipeline, cost controls, and ranked results.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
-_render_cost_hero(
-    provider_spend=provider_spend,
-    lifetime_openai_billing=lifetime_openai_billing,
-    recent_openai_billing=recent_openai_billing,
-    tavily_billing=tavily_billing,
-    local_openai_estimate=local_openai_estimate,
-    total_tokens=int(run_totals.get("total_tokens") or 0),
-    openai_calls=int(run_totals.get("openai_calls") or 0),
-    last_api_calls=last_api_calls,
-    last_run_local_openai_estimate=last_run_local_openai_estimate,
-    model_name=str(runtime_settings.openai_model),
-)
-_render_summary_card(
-    "Billing source",
-    [
-        ("OpenAI", _billing_status(lifetime_openai_billing)),
-        ("Billing start", str(lifetime_openai_billing.window_start_label or "Unavailable")),
-        ("Tavily", f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"),
-        ("Hosting", f"Streamlit Community Cloud, {_format_currency(provider_spend.hosting_billed_usd)}"),
-    ],
+st.progress((slide_index + 1) / slide_count, text=f"{slide_index + 1} of {slide_count}: {slide['title']}")
+st.markdown(
+    "<div class='slide-shell'>"
+    f"<div class='slide-label'>{html.escape(slide['label'])}</div>"
+    f"<div class='slide-title'>{html.escape(slide['title'])}</div>"
+    f"<div class='slide-copy'>{html.escape(slide['copy'])}</div>",
+    unsafe_allow_html=True,
 )
 
-if frame.empty:
-    st.warning("Start by loading the Manifest list. No paid APIs are used in the first screen.")
-    st.stop()
-
-st.markdown("<div class='section-label'>Ranked prospects</div>", unsafe_allow_html=True)
-_render_prospect_cards(
-    prospects.head(8),
-    "No AI-scored prospects yet. Run the evidence cascade first.",
-)
-
-st.markdown("<div class='section-label'>Evidence routing</div>", unsafe_allow_html=True)
-cols = st.columns((1, 1))
-with cols[0]:
+if slide["key"] == "overview":
     _render_summary_card(
-        "Cascade counts",
+        "Flow",
         [
-            ("API-eligible", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
+            ("1. Source", "Manifest companies are cleaned and deduplicated."),
+            ("2. Screen", "Obvious non-prospects are removed without paid APIs."),
+            ("3. Evidence", "Homepage metadata is checked before paid search."),
+            ("4. Search", "Tavily is used only when evidence is missing or unclear."),
+            ("5. Score", "OpenAI scores compact evidence packets, not raw names."),
+            ("6. Report", "Prospects and provider costs are shown separately."),
+        ],
+    )
+elif slide["key"] == "source":
+    _render_mini_metrics(
+        [
+            ("Raw rows", _format_int(metrics["raw_companies"])),
+            ("Unique names", _format_int(metrics["unique_companies"])),
+            ("API-eligible", _format_int(candidate_count)),
+            ("No paid APIs", "$0.0000"),
+        ]
+    )
+    _render_summary_card(
+        "First screen",
+        [
+            ("Input", "Public Manifest attendee list"),
+            ("Cleaning", "Normalize names and remove duplicate entries"),
+            ("Filtering", "Remove obvious incumbents, investors, associations, services, and noisy rows"),
+            ("Result", f"{_format_int(candidate_count)} companies remain eligible for evidence collection"),
+        ],
+    )
+    if workflow_stage == 1 and st.button("Load and screen Manifest list", type="primary", use_container_width=True):
+        st.session_state["load_source_requested"] = True
+        st.rerun()
+elif slide["key"] == "homepage":
+    _render_mini_metrics(
+        [
             ("Homepage checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
             ("Homepage sufficient", _format_int(cascade_summary.get("score_from_homepage") or 0)),
             ("Needs search", _format_int(cascade_summary.get("needs_tavily") or 0)),
             ("Data gaps", _format_int(cascade_summary.get("data_gaps") or 0)),
-        ],
+        ]
     )
-with cols[1]:
     _render_summary_card(
-        "Cost saved",
+        "Why this matters",
         [
-            ("Search calls avoided", _format_int(tavily_avoided)),
-            ("Search credits saved", _format_int(tavily_avoided)),
-            ("Estimated search cost saved", _format_currency(tavily_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0))),
+            ("Avoids name-only judgment", "Evidence comes from domains, metadata, snippets, and route reasons."),
+            ("Reduces paid search", f"{_format_int(tavily_avoided)} search calls avoided so far."),
+            ("Protects recall", "Unclear homepage evidence routes to search instead of becoming a hard rejection."),
         ],
     )
+    if pending_verify_run and st.button("Preview homepage evidence - no paid APIs", type="primary", use_container_width=True):
+        with st.spinner("Collecting bounded homepage/domain evidence without paid provider calls..."):
+            run_deterministic_classification(conn)
+            preview_cap = max(1, min(int(pending_verify_run["cap"]), _setting_int(runtime_settings, "homepage_preview_max_per_click", 1)))
+            preview_settings = replace(
+                runtime_settings,
+                homepage_evidence_max_per_run=preview_cap,
+                homepage_fetch_timeout_seconds=min(float(_setting(runtime_settings, "homepage_fetch_timeout_seconds", 4.0) or 4.0), 1.0),
+            )
+            preview_result = collect_homepage_evidence(
+                conn,
+                preview_settings,
+                preview_cap,
+                False,
+                mode=pending_mode,
+                max_domain_attempts=1,
+            )
+        st.session_state["last_action"] = {
+            "message": f"Homepage preview checked {_format_int(preview_result.counts.get('processed'))} sample company. No Tavily or OpenAI calls were made.",
+            "level": "success",
+        }
+        st.rerun()
+elif slide["key"] == "estimate":
+    if pending_verify_run:
+        _render_mini_metrics(
+            [
+                ("Companies", _format_int(pending_verify_run["cap"])),
+                ("Search calls", _format_int(pending_verify_run["projected_tavily_calls"])),
+                ("AI calls", _format_int(pending_verify_run["projected_openai_calls"])),
+                ("Estimated cost", _format_currency(pending_verify_run["projected_total"])),
+            ]
+        )
+        _render_summary_card("Before paid calls", projected_rows)
+        _render_summary_card("Evidence routing", cascade_rows)
+        if st.button("Confirm paid search and AI run", type="primary", use_container_width=True):
+            st.session_state["active_verify_mode"] = pending_mode
+            st.session_state["start_paid_run_requested"] = True
+            st.rerun()
+    else:
+        st.warning("Load the Manifest list before estimating paid search and AI usage.")
+elif slide["key"] == "cost":
+    _render_mini_metrics(
+        [
+            ("Actual billed cost", _format_billed_total(provider_spend)),
+            ("OpenAI tokens", _format_int(int(run_totals.get("total_tokens") or 0))),
+            ("Search credits used", _format_int(tavily_billing.credits_used)),
+            ("Search calls avoided", _format_int(tavily_avoided)),
+        ]
+    )
+    _render_cost_hero(
+        provider_spend=provider_spend,
+        lifetime_openai_billing=lifetime_openai_billing,
+        recent_openai_billing=recent_openai_billing,
+        tavily_billing=tavily_billing,
+        local_openai_estimate=local_openai_estimate,
+        total_tokens=int(run_totals.get("total_tokens") or 0),
+        openai_calls=int(run_totals.get("openai_calls") or 0),
+        last_api_calls=last_api_calls,
+        last_run_local_openai_estimate=last_run_local_openai_estimate,
+        model_name=str(runtime_settings.openai_model),
+    )
+elif slide["key"] == "prospects":
+    _render_prospect_cards(
+        prospects.head(5),
+        "No AI-scored prospects yet. Run the evidence cascade first.",
+    )
+elif slide["key"] == "routing":
+    cols = st.columns((1, 1))
+    with cols[0]:
+        _render_summary_card(
+            "Cascade counts",
+            [
+                ("API-eligible", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
+                ("Homepage checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
+                ("Homepage sufficient", _format_int(cascade_summary.get("score_from_homepage") or 0)),
+                ("Needs search", _format_int(cascade_summary.get("needs_tavily") or 0)),
+                ("Data gaps", _format_int(cascade_summary.get("data_gaps") or 0)),
+            ],
+        )
+    with cols[1]:
+        _render_summary_card(
+            "Cost saved",
+            [
+                ("Search calls avoided", _format_int(tavily_avoided)),
+                ("Search credits saved", _format_int(tavily_avoided)),
+                ("Estimated search cost saved", _format_currency(tavily_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0))),
+            ],
+        )
+
+st.markdown("</div>", unsafe_allow_html=True)
+nav_cols = st.columns((1, 1, 1))
+if nav_cols[0].button("Previous", disabled=slide_index == 0, use_container_width=True):
+    st.session_state["slide_index"] = max(0, slide_index - 1)
+    st.rerun()
+nav_cols[1].markdown(
+    f"<div class='slide-nav-note'>{slide_index + 1} / {slide_count}</div>",
+    unsafe_allow_html=True,
+)
+if nav_cols[2].button("Next", disabled=slide_index >= slide_count - 1, type="primary", use_container_width=True):
+    st.session_state["slide_index"] = min(slide_count - 1, slide_index + 1)
+    st.rerun()
 
 st.stop()
