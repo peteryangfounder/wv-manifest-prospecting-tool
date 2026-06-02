@@ -1,6 +1,6 @@
 # Future Capabilities
 
-The current app turns the Manifest attendee list into a working Wittington Ventures sourcing dashboard. The larger opportunity is to make the same workflow apply to any company universe: conference lists, CRM exports, inbound pitch lists, accelerator cohorts, portfolio ecosystem maps, partner referrals, sector scans, and first-party Wittington datasets.
+The current app turns the Manifest attendee list into a working Wittington Ventures sourcing workflow with raw-row loading, company normalization, deterministic exclusions, company-page checks, Tavily search for unresolved rows, OpenAI scoring, live billing/usage reporting, and scored-company review. The larger opportunity is to make the same workflow apply to any company universe: conference lists, CRM exports, inbound pitch lists, accelerator cohorts, portfolio ecosystem maps, partner referrals, sector scans, and first-party Wittington datasets.
 
 ## Generalize Beyond Manifest
 
@@ -10,7 +10,7 @@ The data model should treat Manifest as one source adapter. Additional adapters 
 
 For arbitrary datasets, the app should support column mapping. A user should be able to map source columns such as company name, website, country, category, description, employee count, funding stage, source URL, contact name, email, and notes. When a row already includes useful first-party or third-party fields, the pipeline should use them instead of paying to rediscover the same facts.
 
-The source funnel should become configurable by campaign. The current Manifest demo already has precision-first, balanced, and recall-first verification modes, plus a ranked candidate queue so obvious technology companies are enriched first and ambiguous candidates remain eligible after them. A production version should let users save those mode settings as reusable campaign policies, including budget caps, recall posture, required evidence depth, and false-negative audit size.
+The source funnel should become configurable by campaign. The current Manifest demo already has precision-first, balanced, and recall-first verification modes in code, plus a ranked candidate queue so obvious technology companies are enriched first and ambiguous candidates remain eligible after them. The interview demo keeps the visible workflow deliberately simple, but a production version should expose those mode settings as reusable campaign policies, including budget caps, recall posture, required evidence depth, default batch sizes, pay-as-you-go policy, and false-negative audit size.
 
 ## First-Party Wittington Data
 
@@ -48,7 +48,7 @@ Each provider should be wrapped behind a common adapter interface with cost meta
 
 ## Performance And Job Architecture
 
-The current implementation parallelizes network-bound Tavily and OpenAI calls and keeps SQLite writes serialized. That is a good demo-scale architecture. A production version should move long runs into durable background jobs with resumable checkpoints.
+The current implementation parallelizes network-bound company-page checks, Tavily calls, and OpenAI calls while keeping SQLite writes serialized. That is a good demo-scale architecture. A production version should move long runs into durable background jobs with resumable checkpoints.
 
 The production job system should support pause, resume, cancel, retry failed rows, schedule overnight runs, run only uncached rows, cap spend per job, cap spend per source, and stop automatically when provider cost exceeds a configured threshold. It should also support adaptive concurrency: raising or lowering worker counts based on 429 frequency, provider latency, error rate, remaining budget, and account-tier limits.
 
@@ -56,21 +56,21 @@ For very large campaigns, the system should evaluate whether OpenAI Batch API, e
 
 Future cheap-recall layers could build on the current website-domain and homepage-metadata pass with embeddings over company names and descriptions, low-cost classifier models, company database lookups, and stratified sampling of ambiguous rows. These layers would reduce the chance that a promising company with a generic name is missed by the first deterministic pass.
 
-The first bounded web-metadata pass and a lightweight false-negative audit sample now exist, but both should become richer. Future versions should add better domain discovery, bounded `/about`, `/product`, `/platform`, and `/solutions` fetches, more robust wrong-entity detection, semantic scoring over extracted text, persistent reviewer labels, and measured audit outcomes for homepage-routed soft exclusions. That would add recall without sending every row immediately to an LLM.
+The first bounded web-metadata pass, conservative domain attempts, company-page scoring route, Tavily escalation route, data-gap route, and lightweight false-negative audit sample now exist, but all of them should become richer. Future versions should add better domain discovery, bounded `/about`, `/product`, `/platform`, and `/solutions` fetches, more robust wrong-entity detection, semantic scoring over extracted text, persistent reviewer labels, and measured audit outcomes for homepage-routed soft exclusions. That would add recall without sending every row immediately to an LLM.
 
 The target production cascade should be: conservative deterministic exclusion, domain discovery, homepage metadata extraction, local semantic triage, Tavily Basic Search for unresolved or uncertain rows, evidence-gated OpenAI scoring, dual ranking by investment fit and review priority, and false-negative audits. The app should store each stage as a versioned artifact so the team can measure whether the extra stage improved recall, precision, cost per useful lead, and review burden.
 
 ## Cost Governance
 
-The current app already separates live OpenAI project billing, recent billing, internal token-rate estimates, Tavily included credits, Tavily billed spend, and Streamlit Cloud hosting. Production cost governance should add account-level budgets, campaign-level budgets, per-provider budgets, approval thresholds, and audit history.
+The current app already separates live OpenAI project billing, recent billing, internal token-rate estimates, live Tavily usage snapshots when available, local Tavily run records when live usage is unavailable, Tavily included credits, Tavily pay-as-you-go billed spend, and Streamlit Cloud hosting. Production cost governance should add account-level budgets, campaign-level budgets, per-provider budgets, approval thresholds, and audit history.
 
-Before a user launches a large uncached run, the app should continue to show projected Tavily calls, OpenAI calls, token usage, expected provider cost, credits remaining, estimated runtime, and cache assumptions. For bigger deployments, it should also show confidence bands based on prior observed tokens per company, provider error rates, and expected retry overhead.
+Before a user launches a large uncached run, the app should continue to show projected page checks, Tavily calls, OpenAI calls, token usage, expected provider cost, credits remaining, pay-as-you-go overage exposure, worker counts, estimated runtime, and cache assumptions. For bigger deployments, it should also show confidence bands based on prior observed tokens per company, website timeout rates, provider error rates, and expected retry overhead.
 
-Pay-as-you-go providers should default to disabled unless a fund operator explicitly enables them. If enabled, the app should make overage exposure clear before execution and should stop automatically at a configured spend ceiling.
+Pay-as-you-go providers should default to disabled for cost-contained demos unless a fund operator explicitly enables them. If enabled, the app should make overage exposure clear before execution and should stop automatically at a configured spend ceiling. The current app reports the exposure; the production version should enforce it.
 
 ## Review Workflow
 
-A production version should add persistent review state. Saved shortlists, owner assignment, partner comments, duplicate resolution, review status, thesis-specific views, and audit history would make the tool useful for recurring sourcing work. Relevant Wittington views could include commerce infrastructure, retail operations, health services, consumer fintech, loyalty, climate, logistics software, real estate operations, and pharmacy technology.
+A production version should add persistent review state beyond the current scored-company cards. Saved shortlists, owner assignment, partner comments, duplicate resolution, review status, thesis-specific views, and audit history would make the tool useful for recurring sourcing work. Relevant Wittington views could include commerce infrastructure, retail operations, health services, consumer fintech, loyalty, climate, logistics software, real estate operations, and pharmacy technology.
 
 Useful bulk actions would include CRM export, reviewer assignment, deeper diligence requests, partner-introduction notes, meeting-request drafts, memo generation, and follow-up reminders. The company detail page should show source records, enrichment evidence, score components, confidence level, score history, rank changes, and the reason for each material score change.
 
@@ -82,4 +82,14 @@ The ranking should answer whether a company is worth Wittington’s attention in
 
 Future versions should provide thesis summaries, market maps, ranked shortlists, key diligence questions, suggested operating-company introductions, competitive context, buyer relevance, and a short memo for each high-priority company. Every claim should remain tied to evidence so the tool supports investment judgment instead of replacing it with opaque scoring.
 
-The long-term goal is a repeatable sourcing intelligence system: start with any company universe, enrich it with public and first-party data, score it against Wittington’s current theses, control provider spend, explain uncertainty, preserve evidence, and turn noisy lists into an actionable venture pipeline.
+## Demo-To-Production Handoff
+
+The current interview demo is intentionally narrow: one source list, one investor narrative, a guided Streamlit walkthrough, SQLite persistence, synchronous operations, and transparent provider-cost reporting. That makes it explainable in a live meeting. The production version should preserve that explainability while adding multi-campaign persistence, background jobs, durable approvals, richer evidence adapters, reviewer workflow, and CRM integration.
+
+The highest-leverage next build would be a campaign model. Each campaign should store source adapter, uploaded rows, source mapping, scoring thesis, budget policy, verification mode, provider settings, review state, cost history, and exports. Manifest would become the first campaign adapter rather than the hard-coded product boundary.
+
+The second priority should be persistent human review. The current app can rank and explain scored companies, but it does not yet remember partner decisions as durable first-party signal. Review decisions, pass reasons, corrected sectors, corrected stages, ownership, and partner comments should feed future scoring and recall audits.
+
+The third priority should be production job control. The current split operation slides already make page checks, Tavily search, and OpenAI scoring operationally separate. Production should turn those operations into resumable jobs with spend ceilings, cancellation, retry failed rows, adaptive concurrency, and after-action reports that compare projected cost, actual billed cost, actual credits, runtime, errors, and useful prospects found.
+
+The long-term goal is a repeatable sourcing intelligence system: start with any company universe, enrich it with public and first-party data, score it against Wittington’s current theses, control provider spend, explain uncertainty, preserve evidence, learn from reviewer feedback, and turn noisy lists into an actionable venture pipeline.

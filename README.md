@@ -2,7 +2,7 @@
 
 Manifest Prospecting Tool is an internal VC sourcing workflow for Wittington Ventures. It turns the public Manifest attendee list into an evidence-backed ranked prospect list with clear cost and API usage reporting.
 
-The product uses code for retrieval, storage, filtering, concurrency, retry handling, and cost control. It uses Tavily for external search evidence, then uses OpenAI for scoring after that evidence has been retrieved and cached.
+The product uses code for retrieval, storage, filtering, evidence routing, concurrency, retry handling, and cost control. It first checks low-cost company-page evidence, uses Tavily only when that evidence is missing or unclear, then uses OpenAI for structured scoring after source evidence has been retrieved and cached.
 
 Run locally:
 
@@ -14,14 +14,17 @@ Hosted app: not currently published. The previous Streamlit Cloud URL no longer 
 
 ## Current App
 
-- Slide-style Streamlit onboarding flow built around the investor narrative: Manifest list, first screen, homepage evidence, search enrichment, AI scoring, ranked prospects.
-- One focused idea per screen, with previous/next navigation and progress shown at the top.
-- Ranked prospect cards backed by source URLs, evidence snippets, confidence, and route reasons.
-- Cost and usage section that separates live provider billing, included Tavily credits, Streamlit Community Cloud hosting, and internal token-rate estimates.
+- Slide-style Streamlit walkthrough built around the investor narrative: raw Manifest rows, normalized company names, exclusions, company-page checks, Tavily web search, OpenAI scoring, API cost detail, and scored-company review.
+- One focused operation per screen, with previous/next navigation, before/after operation panels, and progress shown at the top.
+- Batch-size controls for 10, 100, 1,000, or all rows kept after exclusions, depending on the current candidate universe.
+- Company-page checks, Tavily search, and OpenAI scoring are separate operations with their own setup metrics, action buttons, progress labels, ETA, worker counts, and result panels.
+- Ranked prospect cards backed by source URLs, source type, evidence snippets, confidence, and route reasons.
+- Cost and usage section that separates live provider billing, live Tavily usage snapshots when available, included Tavily credits, Streamlit Community Cloud hosting, and internal token-rate estimates.
 - Wittington project lifetime-to-date OpenAI billing, recent OpenAI billing, last fetch time, cache status, and billing-window metadata.
-- Pre-run cost and runtime confirmation before paid provider calls begin.
-- Concurrent Tavily enrichment and OpenAI scoring with bounded retry/backoff for rate limits and transient provider errors.
+- Pre-run cost, credit, token, worker-count, and runtime estimates before paid provider operations begin.
+- Parallel homepage checks, Tavily enrichment, and OpenAI scoring with bounded retry/backoff for rate limits and transient provider errors.
 - Visible evidence-routing counts for homepage checks, search-needed rows, data gaps, and search calls avoided.
+- Global cache reset control that clears source rows, company-page data, Tavily results, and OpenAI scores while preserving internal run history for cost reporting.
 
 ## Tech Stack
 
@@ -60,8 +63,11 @@ PROVIDER_MAX_RETRIES=4
 PROVIDER_BACKOFF_INITIAL_SECONDS=1.0
 PROVIDER_BACKOFF_MAX_SECONDS=20.0
 HOMEPAGE_EVIDENCE_MAX_PER_RUN=100
+HOMEPAGE_PREVIEW_MAX_PER_CLICK=3
+HOMEPAGE_CONCURRENCY=96
 HOMEPAGE_FETCH_TIMEOUT_SECONDS=4.0
 HOMEPAGE_FETCH_MAX_BYTES=200000
+HOMEPAGE_MAX_DOMAIN_ATTEMPTS=3
 TAVILY_MAX_RESULTS=3
 DATABASE_PATH=data/prospects.db
 OPENAI_INPUT_COST_PER_1M_TOKENS=0.15
@@ -71,6 +77,7 @@ OPENAI_BILLING_PROJECT_ID=proj_ynS2F3GVOCBbgmXvTl9Vl1Ie
 OPENAI_BILLING_START_DATE=2026-05-31
 OPENAI_BILLING_LOOKBACK_DAYS=30
 OPENAI_BILLING_CACHE_TTL_SECONDS=300
+DEMO_SAFE_MODE_DEFAULT=true
 TAVILY_PLAN_NAME=Researcher
 TAVILY_INCLUDED_MONTHLY_CREDITS=1000
 TAVILY_PAY_AS_YOU_GO_ENABLED=true
@@ -85,16 +92,16 @@ The app opens without API keys and can create baseline rule scores. Set `TAVILY_
 streamlit run app.py
 ```
 
-Use the dashboard in this order:
-
 Use the app like a short onboarding deck:
 
 1. Move through the slides with **Next** and **Previous**.
-2. On **Step 1**, click **Load and screen Manifest list**.
-3. On **Step 2**, click **Preview homepage evidence - no paid APIs** to show the low-cost homepage/domain layer before paid search.
-4. On **Step 3**, review companies, Tavily search calls, OpenAI scoring calls, estimated provider cost, runtime, and tokens.
-5. Click **Confirm paid search and AI run** only after the estimate is acceptable.
-6. Continue through the cost, ranked prospects, and evidence-routing slides.
+2. On **Step 1**, click **Load Manifest list** to save raw attendee-company rows.
+3. On **Step 2**, click **Normalize company names** to dedupe and create canonical company records.
+4. On **Step 3**, click **Remove excluded rows** to apply the deterministic non-target screen.
+5. On **Step 4**, choose a batch size and click **Check company pages**. This reads page titles, descriptions, headings, and short homepage text before any Tavily calls.
+6. On **Step 5**, review Tavily calls, skipped calls, pay-as-you-go-equivalent value, overage status, worker count, and estimated web-search time, then click **Run web search** when search is needed.
+7. On **Step 6**, review OpenAI scoring calls, estimated tokens, token-cost estimate, worker count, output-token cap, and estimated scoring time, then click **Run OpenAI scoring**.
+8. Continue through **Review API cost detail** and **Review scored companies**.
 
 For a command-line run:
 
@@ -112,7 +119,7 @@ python scripts/run_pipeline.py --score --max-score 25
 
 ## How The Pipeline Works
 
-`src/scrape.py` tries to scrape the live Manifest attendee page. If the live scrape returns too little data or fails, it loads `data/manifest_attendees_seed.txt`.
+`src/scrape.py` tries to scrape the live Manifest attendee page. If the live scrape returns too little data or fails, it loads `data/manifest_attendees_seed.txt`. The Streamlit workflow stores raw rows first, then normalizes them in a separate step so the demo can show the transition from attendee rows to canonical company records.
 
 `src/clean.py` preserves the raw company name while creating a normalized key for deduplication. Legal suffixes like `Inc.`, `LLC`, and `Corporation` are removed only for matching.
 
@@ -126,11 +133,11 @@ python scripts/run_pipeline.py --score --max-score 25
 
 `src/db.py` stores companies, enrichments, scores, and run metadata. The dashboard uses that run metadata for API-call counts, tokens, cache hits, and estimated spend.
 
-The enrichment and scoring stages run provider requests concurrently while keeping SQLite writes on the main thread. `TAVILY_CONCURRENCY` and `OPENAI_CONCURRENCY` control the number of simultaneous provider requests. This turns the slowest parts of the workflow from one-company-at-a-time waiting into parallel I/O while preserving deterministic database writes. The worker counts improve throughput but do not change the number of provider calls; the dashboard batch size, high-priority queue, and cache reuse remain the primary cost controls. If Tavily or OpenAI rate-limits the run, lower the matching concurrency value. `OPENAI_MAX_COMPLETION_TOKENS` caps each scoring response so output-token cost cannot run away. `DB_COMMIT_BATCH_SIZE` controls how often completed results are committed during a run.
+The homepage, enrichment, and scoring stages run network requests concurrently while keeping SQLite writes on the main thread. `HOMEPAGE_CONCURRENCY`, `TAVILY_CONCURRENCY`, and `OPENAI_CONCURRENCY` control the number of simultaneous network/provider requests. The current defaults are aggressive for a fast demo: 96 homepage workers, 48 Tavily workers, and 48 OpenAI workers, each bounded by the number of rows in the current operation. This turns the slowest parts of the workflow from one-company-at-a-time waiting into parallel I/O while preserving deterministic database writes. The worker counts improve throughput but do not change the number of provider calls; the dashboard batch size, high-priority queue, homepage routing, and cache reuse remain the primary cost controls. If a provider rate-limits the run, lower the matching concurrency value. `OPENAI_MAX_COMPLETION_TOKENS` caps each scoring response so output-token cost cannot run away. `DB_COMMIT_BATCH_SIZE` controls how often completed results are committed during a run.
 
-The bounded homepage evidence pass runs before Tavily. `HOMEPAGE_EVIDENCE_MAX_PER_RUN` caps how many companies receive this near-free metadata check in one Streamlit run. `HOMEPAGE_FETCH_TIMEOUT_SECONDS` and `HOMEPAGE_FETCH_MAX_BYTES` keep network calls bounded. Homepage evidence that is strong enough creates a cached `homepage` enrichment record so OpenAI can score compact homepage evidence without a Tavily call. Weak, missing, or contradictory homepage evidence routes the company to Tavily instead of excluding it.
+The bounded homepage evidence pass runs before Tavily. `HOMEPAGE_EVIDENCE_MAX_PER_RUN` caps the default page-check batch, while the slide UI lets the operator choose the current batch size. `HOMEPAGE_MAX_DOMAIN_ATTEMPTS` limits conservative domain guesses per company. `HOMEPAGE_FETCH_TIMEOUT_SECONDS` and `HOMEPAGE_FETCH_MAX_BYTES` keep network calls bounded. Homepage evidence that is strong enough creates a cached `homepage` enrichment record so OpenAI can score compact homepage evidence without a Tavily call. Weak, missing, ambiguous, blocked, or contradictory homepage evidence routes the company to Tavily or a data-gap state instead of silently excluding it.
 
-Before a verification run starts, the dashboard shows a confirmation step with the selected mode, API-eligible universe, domain-discovery candidates, cached resolved domains, homepage evidence-ready companies, Tavily-needed companies, Tavily calls skipped because homepage evidence is sufficient, homepage data gaps, projected uncached Tavily calls, projected OpenAI scoring calls, estimated token usage, estimated provider cost, and approximate runtime. No Tavily or OpenAI provider calls are made until the user confirms that estimate.
+Before paid work starts, the dashboard shows operation-specific setup metrics: selected batch size, API-eligible universe, homepage pages checked, companies scoreable from page data, companies needing Tavily, Tavily calls skipped because homepage evidence is sufficient, projected uncached Tavily calls, pay-as-you-go-equivalent value, overage status, projected OpenAI scoring calls, estimated token usage, worker counts, and approximate runtime. No Tavily or OpenAI provider calls are made until the operator starts the corresponding operation.
 
 Provider calls use bounded retries with exponential backoff and jitter for transient errors such as 408, 409, 425, 429, and 5xx responses. When a provider includes `Retry-After`, the app uses it. `PROVIDER_MAX_RETRIES`, `PROVIDER_BACKOFF_INITIAL_SECONDS`, and `PROVIDER_BACKOFF_MAX_SECONDS` control that behavior. Non-retryable provider failures are recorded per company so a single bad row does not stop the full batch.
 
@@ -166,7 +173,7 @@ Rows with clear technology or Wittington-relevant signals run first. Examples of
 
 This is why the demo can be cost-effective without relying on a brittle keyword-only boundary. The deterministic name pass is used only for hard exclusions and ordering. It is not the final investment judgment. The app avoids paying Tavily and OpenAI to inspect obvious non-prospects, starts with rows most likely to contain technology companies, then keeps moving into ambiguous candidates within the approved batch cap. Tavily provides low-cost external web evidence, and OpenAI scores the compact evidence rather than the name alone. The app reuses cached provider results and uses compact prompts with a low-cost OpenAI model. This is a ranked cost-control architecture, not an assertion that company names alone are enough to identify every investable startup.
 
-At the current configured prices, a broad pass over all 2,444 API-eligible candidates is still designed to be plausible under a small testing budget when Tavily pay-as-you-go is explicitly enabled: the first 1,000 Tavily credits are included on the Researcher plan, 1,444 additional credits at `$0.008` would be about `$11.55`, and the default OpenAI token-rate estimate for compact `gpt-4o-mini` scoring is typically well below the remaining budget. The confirmation screen computes the actual projected calls, candidate mix, tokens, Tavily overage, pay-as-you-go status, and estimated provider cost before any paid provider calls begin.
+At the current configured prices, a broad pass over all 2,444 API-eligible candidates is still designed to be plausible under a small testing budget when Tavily pay-as-you-go is explicitly enabled: the first 1,000 Tavily credits are included on the Researcher plan, 1,444 additional credits at `$0.008` would be about `$11.55`, and the default OpenAI token-rate estimate for compact `gpt-4o-mini` scoring is typically well below the remaining budget. The operation slides compute projected calls, candidate mix, tokens, Tavily overage, pay-as-you-go status, worker counts, and estimated provider cost before paid provider calls begin.
 
 Verification modes make the precision/recall tradeoff explicit:
 
@@ -174,7 +181,7 @@ Verification modes make the precision/recall tradeoff explicit:
 - **Balanced** is the default. It runs high-signal and likely-technology rows first, then adds ambiguous candidates within the approved cap.
 - **Recall-first** is for broad audits and larger approved runs. It uses the broad candidate universe and escalates more unresolved or uncertain companies through the homepage-to-Tavily evidence cascade.
 
-The current architecture is a staged evidence cascade: deterministic exclusions, domain discovery, homepage metadata extraction, local semantic triage, budget-aware Tavily Basic Search, evidence-gated OpenAI scoring, ranking, and false-negative audits. That avoids both bad extremes: name-keyword filtering only, and blindly spending paid APIs on every raw row.
+The current architecture is a staged evidence cascade: deterministic exclusions, domain discovery, homepage metadata extraction, local semantic triage, budget-aware Tavily Basic Search, evidence-gated OpenAI scoring, ranking, and false-negative audit support. That avoids both bad extremes: name-keyword filtering only, and blindly spending paid APIs on every raw row.
 
 The current implementation includes the first bounded version of that cascade. It is intentionally not a broad crawler: it starts with homepage metadata only, caches results, uses conservative domain confidence, and treats network failures as data gaps rather than exclusions. The next extension should add bounded `/about`, `/product`, `/platform`, and `/solutions` fetches after the homepage-only layer is measured.
 
@@ -182,16 +189,16 @@ The current implementation includes the first bounded version of that cascade. I
 
 The tool does not ask AI to judge raw company names. It first uses deterministic rules only to remove obvious non-prospects and order the queue. It then attempts cheap homepage/domain evidence for API-eligible companies. If homepage evidence is strong enough, Tavily search is skipped and the company can move directly to OpenAI scoring with a compact evidence packet. If homepage evidence is missing, unclear, blocked, contradictory, or unresolved, the row escalates to Tavily rather than being hard-excluded.
 
-OpenAI scores compact evidence packets, not names. The packet includes external snippets, source URLs, homepage route decisions, route reasons, positive and negative signals, domain confidence, and data-gap context when available. The UI exposes those same route decisions, evidence snippets, evidence source labels, confidence values, and false-negative audit samples so an investor can inspect why a company was routed or ranked.
+OpenAI scores compact evidence packets, not names. The packet includes external snippets, source URLs, homepage route decisions, route reasons, positive and negative signals, domain confidence, and data-gap context when available. The UI exposes source type, source URLs, source snippets, confidence values, scores, and route context so an investor can inspect why a company was ranked.
 
-Demo narrative: the app does not make investment judgments from names alone. It gathers cheap homepage evidence first, escalates to search only when evidence is missing or unclear, and sends OpenAI compact evidence packets rather than raw company names. The interface shows confidence, snippets, route reasons, search calls avoided, and false-negative audit samples so the workflow is inspectable.
+Demo narrative: the app does not make investment judgments from names alone. It gathers cheap homepage evidence first, escalates to search only when evidence is missing or unclear, and sends OpenAI compact evidence packets rather than raw company names. The interface shows confidence, snippets, source type, search calls avoided, API usage, and billing source status so the workflow is inspectable.
 
 ## Billing And Usage Tracking
 
 The **API usage and cost** section separates provider-billed spend from internal estimates:
 
-- Tavily search calls
-- Tavily plan credits consumed
+- Tavily search calls recorded locally
+- Live Tavily usage API credits consumed when `TAVILY_API_KEY` is configured and the usage endpoint is reachable
 - Tavily free credits remaining
 - Tavily actual billed spend, which is `$0.00` on the Researcher plan while pay-as-you-go is disabled
 - OpenAI scoring calls
@@ -208,11 +215,11 @@ The **API usage and cost** section separates provider-billed spend from internal
 
 Provider-billed OpenAI cost for the configured `OPENAI_BILLING_PROJECT_ID` is the source of truth for live billing when available. The primary dashboard total uses `OPENAI_BILLING_START_DATE` through the current time for the Wittington project lifetime-to-date window. The recent-cost card keeps `OPENAI_BILLING_LOOKBACK_DAYS` for a shorter usage view. OpenAI billing responses are paginated and cached for `OPENAI_BILLING_CACHE_TTL_SECONDS` because Streamlit reruns frequently. If project-scoped billing is unavailable and the OpenAI API returns organization-level fallback data, the app labels it as org-wide context and keeps it separate from the project billed-cost total. If live OpenAI billing is unavailable because `OPENAI_ADMIN_KEY` is missing or the API request fails, the app continues running and clearly labels the internal token-rate fallback as an estimate rather than platform billing data. SQLite stores every run so reruns can show cumulative calls, tokens, cache hits, retry counts, and local estimates.
 
-`TAVILY_COST_PER_CALL_USD` remains supported as an internal pay-as-you-go-equivalent estimate for projections. It is not included in actual provider-billed spend unless Tavily pay-as-you-go is explicitly enabled, in which case overage credits beyond `TAVILY_INCLUDED_MONTHLY_CREDITS` are billed using `TAVILY_PAYG_PRICE_PER_CREDIT_USD`.
+`TAVILY_COST_PER_CALL_USD` remains supported as an internal pay-as-you-go-equivalent estimate for projections. The app fetches live Tavily usage when possible, caches that snapshot to avoid repeated usage calls on Streamlit reruns, and falls back to local run records if the live usage API is unavailable. Tavily usage value is not included in actual provider-billed spend unless Tavily pay-as-you-go is enabled, in which case overage credits beyond `TAVILY_INCLUDED_MONTHLY_CREDITS` are billed using `TAVILY_PAYG_PRICE_PER_CREDIT_USD`.
 
-For the current demo configuration, Tavily pay-as-you-go should remain disabled unless Wittington explicitly wants automated overage billing. With pay-as-you-go disabled, the app can still report credits consumed and remaining included credits while keeping Tavily billed spend at `$0.00`.
+For a cost-contained demo, Tavily pay-as-you-go can be disabled unless Wittington explicitly wants automated overage billing. With pay-as-you-go disabled, the app can still report credits consumed and remaining included credits while keeping Tavily billed spend at `$0.00`. With pay-as-you-go enabled, the app reports the overage exposure and billed overage separately from the planning estimate.
 
-In the current hosted demo, the visible cost can round to `$0.00` for three separate reasons. First, Tavily pay-as-you-go is disabled, so included Researcher-plan credits are tracked as consumed credits rather than billed spend. Second, the OpenAI scoring work uses `gpt-4o-mini` with compact prompts, so observed local token-rate estimates can be less than one cent for small scored batches. Third, live OpenAI billing can be delayed, cached, or rounded in platform reporting. The dashboard therefore shows both live provider billing and the internal token-rate estimate instead of treating either view as a substitute for the other.
+In the current demo, the visible cost can round to `$0.00` for three separate reasons. First, Tavily included Researcher-plan credits are tracked separately from billed pay-as-you-go overage. Second, the OpenAI scoring work uses `gpt-4o-mini` with compact prompts, so observed local token-rate estimates can be less than one cent for small scored batches. Third, live OpenAI billing can be delayed, cached, or rounded in platform reporting. The dashboard therefore shows both live provider billing and the internal token-rate estimate instead of treating either view as a substitute for the other.
 
 ## Performance And Cost Controls
 
@@ -221,25 +228,25 @@ The app is designed to scale from a small demo batch to thousands of attendee ro
 - Rule screening and baseline scoring run before paid APIs.
 - Cached Tavily enrichments and OpenAI scores are reused on reruns.
 - The high-priority queue sends likely venture prospects to paid enrichment before lower-fit rows.
-- Tavily and OpenAI provider calls run in parallel with configurable worker counts.
+- Company-page checks, Tavily calls, and OpenAI calls run in parallel with configurable worker counts.
 - SQLite writes are serialized and batched to avoid thread contention.
 - Transient provider failures use bounded retry/backoff with jitter.
 - Terminal provider failures fall back to recorded error state or baseline score instead of stopping the run.
-- The confirmation step estimates cheap homepage/domain checks, cached homepage routing outcomes, uncached calls, model tokens, OpenAI token-rate cost, Tavily billed cost, total provider cost, worker counts, credits after the run, and approximate runtime before provider calls start.
-- The dashboard shows evidence cascade counts, route examples, paid Tavily calls avoided by homepage evidence, and false-negative audit samples for soft-excluded or uncertain rows.
-- Broad recall runs can include ambiguous companies after high-signal rows; the confirmation card shows the candidate mix before execution.
+- The operation setup panels estimate cheap homepage/domain checks, cached homepage routing outcomes, uncached calls, model tokens, OpenAI token-rate cost, Tavily billed cost, total provider cost, worker counts, credits after the run, and approximate runtime before provider calls start.
+- The dashboard shows evidence cascade counts, paid Tavily calls avoided by homepage evidence, source types, and scored-company evidence snippets.
+- Broad recall runs can include ambiguous companies after high-signal rows; the operation setup panels show the candidate mix before execution.
 - Live billing reads through `OPENAI_ADMIN_KEY` are administrative reads and are not counted as model/token spend.
 
-The current Streamlit implementation runs verification synchronously after confirmation. A production deployment should move long runs into a resumable background job queue if pause, resume, cancellation, or multi-user scheduling are required.
+The current Streamlit implementation runs page checks, web search, and scoring synchronously inside the active app session. A production deployment should move long runs into a resumable background job queue if pause, resume, cancellation, or multi-user scheduling are required.
 
 ## Caching And Reset
 
 - The database is created automatically at `data/prospects.db`.
 - Company rows are keyed by normalized name.
-- Tavily enrichments are keyed by company and provider.
-- OpenAI scores are keyed by company and provider.
+- Homepage and Tavily enrichments are keyed by company and provider.
+- OpenAI scores are keyed by company, with the provider recorded as `baseline` or `openai`.
 - Normal reruns reuse cached rows and continue with the next unprocessed candidate.
-- The sidebar reset button clears local source rows, enrichments, scores, and run history when a clean slate is needed.
+- The header cache reset clears raw source rows, company rows, company-page data, Tavily results, and OpenAI scores when a clean slate is needed. Internal run history is preserved for cost records.
 
 ## Scoring
 
