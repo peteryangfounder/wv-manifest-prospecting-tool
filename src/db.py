@@ -41,6 +41,12 @@ def init_db(conn: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS raw_manifest_rows (
+            id INTEGER PRIMARY KEY,
+            raw_name TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS enrichments (
             id INTEGER PRIMARY KEY,
             company_id INTEGER NOT NULL,
@@ -208,6 +214,25 @@ def upsert_companies(conn: sqlite3.Connection, records: Iterable[CompanyRecord])
         count += 1
     conn.commit()
     return count
+
+
+def replace_raw_manifest_rows(conn: sqlite3.Connection, raw_names: Iterable[str]) -> int:
+    timestamp = now_iso()
+    conn.execute("DELETE FROM raw_manifest_rows")
+    count = 0
+    for raw_name in raw_names:
+        conn.execute(
+            "INSERT INTO raw_manifest_rows (raw_name, created_at) VALUES (?, ?)",
+            (str(raw_name or "").strip(), timestamp),
+        )
+        count += 1
+    conn.commit()
+    return count
+
+
+def list_raw_manifest_names(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute("SELECT raw_name FROM raw_manifest_rows ORDER BY id").fetchall()
+    return [str(row["raw_name"]) for row in rows]
 
 
 def list_companies(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -830,6 +855,7 @@ def metrics(conn: sqlite3.Connection) -> dict[str, Any]:
     enrichment_count = conn.execute(
         "SELECT COUNT(DISTINCT company_id) FROM enrichments WHERE provider IN ('tavily', 'homepage') AND status = 'success'"
     ).fetchone()[0]
+    raw_manifest_row_count = conn.execute("SELECT COUNT(*) FROM raw_manifest_rows").fetchone()[0]
     classified_count = conn.execute("SELECT COUNT(*) FROM companies WHERE deterministic_type IS NOT NULL").fetchone()[0]
     scored_count = conn.execute("SELECT COUNT(*) FROM scores").fetchone()[0]
     openai_count = conn.execute("SELECT COUNT(*) FROM scores WHERE provider = 'openai'").fetchone()[0]
@@ -862,6 +888,7 @@ def metrics(conn: sqlite3.Connection) -> dict[str, Any]:
     ).fetchall()
     return {
         "raw_companies": int(row["raw_companies"] or 0),
+        "raw_manifest_rows": int(raw_manifest_row_count or 0),
         "unique_companies": int(row["unique_companies"] or 0),
         "candidates": int(row["candidates"] or 0),
         "high_priority_queue": int(row["high_priority_queue"] or 0),

@@ -137,6 +137,42 @@ def load_attendees(conn, settings: Settings) -> PipelineResult:
     )
 
 
+def load_manifest_rows(conn, settings: Settings) -> PipelineResult:
+    run_id = db.start_run(conn, "load_manifest_rows")
+    raw_names, metadata = get_attendee_names(settings.manifest_url)
+    raw_count = db.replace_raw_manifest_rows(conn, raw_names)
+    db.finish_run(
+        conn,
+        run_id,
+        raw_count=raw_count,
+        notes=f"Source: {metadata.get('source')}. live_error={metadata.get('live_error', '')}",
+    )
+    return PipelineResult(
+        "load_manifest_rows",
+        f"Loaded {raw_count:,} raw Manifest rows.",
+        {"raw": raw_count, **metadata},
+    )
+
+
+def normalize_manifest_names(conn) -> PipelineResult:
+    run_id = db.start_run(conn, "normalize_manifest_names")
+    raw_names = db.list_raw_manifest_names(conn)
+    records = dedupe_names(raw_names)
+    unique_count = db.upsert_companies(conn, records)
+    db.finish_run(
+        conn,
+        run_id,
+        raw_count=len(raw_names),
+        unique_count=unique_count,
+    )
+    duplicate_count = max(0, len(raw_names) - unique_count)
+    return PipelineResult(
+        "normalize_manifest_names",
+        f"Normalized {len(raw_names):,} raw rows into {unique_count:,} company names. Merged {duplicate_count:,} duplicate rows.",
+        {"raw": len(raw_names), "unique": unique_count, "duplicates": duplicate_count},
+    )
+
+
 def run_deterministic_classification(conn) -> PipelineResult:
     run_id = db.start_run(conn, "deterministic_classification")
     companies = db.list_companies(conn)
