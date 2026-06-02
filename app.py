@@ -900,7 +900,7 @@ CUSTOM_CSS = """
     border-radius: 8px;
     display: grid;
     gap: 0.75rem;
-    grid-template-columns: minmax(12rem, 1fr) minmax(8rem, 0.65fr) minmax(14rem, 1.25fr);
+    grid-template-columns: minmax(14rem, 1fr) minmax(10rem, 0.65fr);
     padding: 0.82rem;
   }
   .prospect-main {
@@ -936,6 +936,7 @@ CUSTOM_CSS = """
   .prospect-evidence {
     color: #313647;
     font-size: 0.92rem;
+    grid-column: 1 / -1;
     line-height: 1.45;
     min-width: 0;
     overflow-wrap: anywhere;
@@ -2220,11 +2221,6 @@ def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
         snippets = row.get("top_snippets") or []
         support_snippet = row.get("support_preview") or (snippets[0] if snippets else "")
         support_snippet = _plain_source_copy(_truncate(support_snippet or row.get("evidence_summary") or "No source text available.", 160))
-        evidence_confidence = (
-            _format_percent(float(row.get("homepage_evidence_quality") or 0.0))
-            if float(row.get("homepage_evidence_quality") or 0.0) > 0
-            else _humanize(row.get("confidence") or "low")
-        )
         body.append(
             "<div class='prospect-card'>"
             "<div class='prospect-main'>"
@@ -2246,10 +2242,6 @@ def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
             "<div class='prospect-evidence'>"
             "<div class='prospect-support-title'>Source text</div>"
             f"{html.escape(support_snippet)}"
-            f"<div class='route-meta'>Positive: {_signal_pills(row.get('homepage_positive_signals'), 'Not captured')}</div>"
-            f"<div class='route-meta'>Negative: {_signal_pills(row.get('homepage_negative_signals'), 'Not captured')}</div>"
-            f"<div class='route-meta'>Confidence: {html.escape(_clean_ui_text(evidence_confidence))}</div>"
-            f"<div class='route-meta'>Decision note: {html.escape(_plain_source_copy(row.get('homepage_route_reason') or row.get('evidence_summary') or 'No decision note recorded.'))}</div>"
             "</div>"
             "</div>"
         )
@@ -2653,7 +2645,7 @@ scored_table = _first_rows(
     weighted_frame[weighted_frame["score_provider"].eq("openai")].copy()
     if not weighted_frame.empty
     else weighted_frame.copy(),
-    8,
+    100,
 )
 routing_table = _first_rows(homepage_checked_frame if not homepage_checked_frame.empty else candidate_table, 8)
 cost_stage_table = pd.DataFrame(metrics.get("cost_by_stage") or [])
@@ -2987,18 +2979,17 @@ elif slide["key"] == "prospects":
     footer_action_label = "Next"
     footer_action_target = "next"
     _render_prospect_cards(
-        prospects.head(5),
+        prospects.head(10),
         "No scored companies yet. Run search and scoring first.",
     )
     _render_stage_table(
-        "Rows after OpenAI API scoring",
-        "First rows shown. Scored rows include the total score and the data source used for scoring.",
+        "All scored companies",
+        "Sorted by score. The table shows every company scored in this run, up to 100 rows.",
         scored_table,
         [
             ("rank", "Rank", "number"),
             ("canonical_name", "Company name", "company"),
-            ("weighted_score", "Total score", "score"),
-            ("company_type_display", "OpenAI company type", "text"),
+            ("weighted_score", "Total score", "number"),
             ("evidence_source_display", "Scoring data", "text"),
         ],
         "No OpenAI-scored rows yet.",
