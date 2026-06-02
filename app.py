@@ -1776,16 +1776,6 @@ simple_demo_view = True
 demo_safe_mode = False
 weights = dict(DEFAULT_WEIGHTS)
 
-with st.sidebar:
-    st.markdown("### Controls")
-    if st.button("Reset workflow", use_container_width=True):
-        _reset_database(conn)
-        st.session_state["last_action"] = {
-            "message": "Workflow reset. Start again with the Manifest list.",
-            "level": "success",
-        }
-        st.rerun()
-
 st.markdown(
     """
     <div class="wv-header">
@@ -1819,25 +1809,6 @@ else:
     )
 _render_guided_steps(metrics)
 
-if workflow_stage == 1:
-    _render_next_step(
-        "Next",
-        "Load and screen the Manifest list.",
-        "No paid APIs are used in this step.",
-    )
-elif workflow_stage == 2:
-    _render_next_step(
-        "Next",
-        "Check the low-cost evidence layer.",
-        "Preview homepage evidence, then confirm the paid search and AI run only if the cost estimate looks right.",
-    )
-else:
-    _render_next_step(
-        "Next",
-        "Review the best prospects.",
-        "Start with the top ranked companies. Cost and evidence details are directly below.",
-    )
-
 selected_model = st.session_state.get("selected_openai_model", settings.openai_model)
 if selected_model not in OPENAI_MODEL_PRESETS:
     selected_model = settings.openai_model if settings.openai_model in OPENAI_MODEL_PRESETS else "gpt-4o-mini"
@@ -1848,21 +1819,12 @@ model_pricing = _selected_model_pricing(selected_model)
 prospect_cap = int(st.session_state.get("prospect_cap", min(settings.max_score, 100)))
 runtime_settings = _settings_for_run(settings, selected_model, model_pricing["input"], model_pricing["output"])
 
-if workflow_stage == 1:
-    primary_label = "1. Load and screen source data"
-elif workflow_stage == 2:
-    primary_label = "2. Review evidence and cost estimate"
-else:
-    primary_label = "Review another evidence run"
-
-if st.button(primary_label, type="primary", use_container_width=True):
-    if workflow_stage == 1:
-        run_step = "source"
-    else:
-        st.session_state["pending_verify_run"] = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode)
-        run_step = "confirm_verify"
-else:
-    run_step = None
+run_step = None
+pending_verify_run = None
+if workflow_stage == 1 and st.button("Load and screen Manifest list", type="primary", use_container_width=True):
+    run_step = "source"
+elif workflow_stage >= 2:
+    pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode)
 
 if run_step == "source":
     load_result = _run_and_store("Loading attendee names...", lambda: load_attendees(conn, settings))
@@ -1874,37 +1836,20 @@ if run_step == "source":
     frame, metrics = _load_frame_and_metrics(conn)
     st.rerun()
 
-pending_verify_run = st.session_state.get("pending_verify_run")
 if pending_verify_run and run_step != "source":
     pending_mode = pending_verify_run.get("mode") or "balanced"
-    mode_label = VERIFY_MODE_PRESETS.get(pending_mode, VERIFY_MODE_PRESETS["balanced"])["label"]
-    high_signal_pending = int(pending_verify_run.get("high_signal_candidates") or 0)
-    likely_tech_pending = int(pending_verify_run.get("other_likely_tech_candidates") or 0)
-    ambiguous_pending = int(pending_verify_run.get("ambiguous_candidates") or 0)
     broad_universe_pending = int(pending_verify_run.get("broad_candidate_universe") or metrics.get("candidates") or 0)
     unique_universe_pending = int(pending_verify_run.get("unique_company_universe") or metrics.get("unique_companies") or 0)
     projected_tavily_overage = int(pending_verify_run.get("projected_tavily_overage") or 0)
     tavily_payg_enabled_pending = bool(pending_verify_run.get("tavily_payg_enabled"))
     projected_rows = [
         ("Companies in this run", _format_int(pending_verify_run["cap"])),
-        (
-            "Candidate universe",
-            f"{_format_int(broad_universe_pending)} API-eligible of {_format_int(unique_universe_pending)} unique",
-        ),
+        ("Candidate universe", f"{_format_int(broad_universe_pending)} of {_format_int(unique_universe_pending)} unique names"),
         ("Search calls", _format_int(pending_verify_run["projected_tavily_calls"])),
         ("AI scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
-        (
-            "Candidate mix",
-            (
-                f"{_format_int(high_signal_pending)} high-signal, "
-                f"{_format_int(likely_tech_pending)} other likely-tech, "
-                f"{_format_int(ambiguous_pending)} ambiguous"
-            ),
-        ),
-        ("OpenAI input tokens", _format_int(pending_verify_run["projected_prompt_tokens"])),
-        ("OpenAI output tokens", _format_int(pending_verify_run["projected_completion_tokens"])),
-        ("AI cost estimate", _format_currency(pending_verify_run["projected_openai_estimate"])),
-        ("Search cost estimate", _format_currency(pending_verify_run["projected_tavily_bill"])),
+        ("OpenAI tokens", f"{_format_int(pending_verify_run['projected_prompt_tokens'])} input, {_format_int(pending_verify_run['projected_completion_tokens'])} output"),
+        ("Estimated provider cost", _format_currency(pending_verify_run["projected_total"])),
+        ("Estimated run time", _format_duration(int(pending_verify_run["estimated_seconds"]))),
     ]
     if projected_tavily_overage > 0 and not tavily_payg_enabled_pending:
         projected_rows.append(
@@ -1919,39 +1864,15 @@ if pending_verify_run and run_step != "source":
                 _format_currency(float(pending_verify_run.get("projected_tavily_payg_if_enabled") or 0.0)),
             )
         )
-    projected_rows.extend(
-        [
-            ("Estimated total provider cost", _format_currency(pending_verify_run["projected_total"])),
-            ("Estimated run time", _format_duration(int(pending_verify_run["estimated_seconds"]))),
-            (
-                "Search credits after run",
-                f"{_format_int(pending_verify_run['tavily_credits_after'])} used, {_format_int(pending_verify_run['tavily_free_credits_remaining_after'])} included credits remaining",
-            ),
-            ("Search pay-as-you-go", "on" if tavily_payg_enabled_pending else "off"),
-        ]
-    )
     cascade_rows = [
         ("API-eligible companies", _format_int(pending_verify_run.get("api_eligible_companies") or broad_universe_pending)),
         ("Homepage evidence attempted", _format_int(pending_verify_run.get("homepage_attempted") or 0)),
-        ("Domain discovery candidates for next run", _format_int(pending_verify_run.get("projected_homepage_candidates") or 0)),
-        ("Accepted domains", _format_int(pending_verify_run.get("accepted_domains") or 0)),
-        ("Provisional domains", _format_int(pending_verify_run.get("provisional_domains") or 0)),
-        ("Unresolved domains", _format_int(pending_verify_run.get("unresolved_domains") or 0)),
         ("Homepage-positive companies", _format_int(pending_verify_run.get("cached_homepage_ready") or 0)),
-        ("Soft-excluded", _format_int(pending_verify_run.get("cached_homepage_soft_excluded") or 0)),
-        ("Data gaps", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
         ("Search calls avoided", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
         ("Needs search", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
-        ("Estimated paid calls avoided", _format_int(pending_verify_run.get("tavily_call_avoided_by_homepage_evidence") or 0)),
-        ("Estimated search credits saved", _format_int(pending_verify_run.get("estimated_tavily_credits_saved") or 0)),
-        ("Estimated search cost saved", _format_currency(pending_verify_run.get("estimated_tavily_cost_saved") or 0)),
+        ("Data gaps", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
     ]
-    st.markdown("<div class='section-label'>Run check</div>", unsafe_allow_html=True)
-    _render_next_step(
-        "Decision",
-        "Preview free homepage evidence, then confirm the paid run.",
-        "The paid run uses Tavily search only where homepage evidence is missing or unclear, then sends compact evidence packets to OpenAI for scoring.",
-    )
+    st.markdown("<div class='section-label'>Run estimate</div>", unsafe_allow_html=True)
     _render_mini_metrics(
         [
             ("Companies", _format_int(pending_verify_run["cap"])),
@@ -1960,10 +1881,8 @@ if pending_verify_run and run_step != "source":
             ("Estimated cost", _format_currency(pending_verify_run["projected_total"])),
         ]
     )
-    st.markdown(
-        "<div class='quiet-note'>Homepage preview uses ordinary web requests only. No Tavily or OpenAI calls happen until the paid run is confirmed.</div>",
-        unsafe_allow_html=True,
-    )
+    _render_summary_card("Before paid calls", projected_rows)
+    _render_summary_card("Evidence routing", cascade_rows)
     if st.button("Preview homepage evidence - no paid APIs", use_container_width=True):
         with st.spinner("Collecting bounded homepage/domain evidence without paid provider calls..."):
             run_deterministic_classification(conn)
@@ -1993,42 +1912,10 @@ if pending_verify_run and run_step != "source":
         )
         st.rerun()
 
-    details_context = st.expander("Evidence and cost details", expanded=False)
-    with details_context:
-        _render_summary_card("Cost estimate", projected_rows)
-        _render_summary_card("Evidence cascade", cascade_rows)
-        route_tabs = st.tabs(["Homepage-positive", "Needs search", "Data gaps", "Soft-exclude", "Unresolved domain"])
-        route_tab_specs = [
-            ("score_from_homepage", "Homepage-positive examples"),
-            ("needs_tavily", "Needs-search examples"),
-            ("low_priority_data_gap", "Data-gap examples"),
-            ("soft_exclude", "Soft-exclude examples"),
-            (None, "Unresolved-domain examples"),
-        ]
-        for route_tab, (route_name, route_title) in zip(route_tabs, route_tab_specs):
-            with route_tab:
-                examples = (
-                    [
-                        example
-                        for example in db.homepage_route_examples(conn, route=None, limit=20)
-                        if example.get("domain_status") == "unresolved"
-                    ][:5]
-                    if route_name is None
-                    else db.homepage_route_examples(conn, route=route_name, limit=5)
-                )
-                _render_route_examples(route_title, examples)
-        st.caption(
-            "OpenAI cost is an internal token-rate estimate based on the selected model and recent usage. "
-            "Actual OpenAI billing may differ. No Tavily or OpenAI provider calls start until you confirm."
-        )
-    confirm_cols = st.columns((1, 1))
-    if confirm_cols[0].button("Confirm paid search and AI run", type="primary", use_container_width=True):
+    if st.button("Confirm paid search and AI run", type="primary", use_container_width=True):
         st.session_state["active_verify_mode"] = pending_mode
         run_step = "verify"
         st.session_state.pop("pending_verify_run", None)
-    if confirm_cols[1].button("Cancel", use_container_width=True):
-        st.session_state.pop("pending_verify_run", None)
-        st.rerun()
 
 if run_step == "verify":
     cap = int(prospect_cap)
@@ -2190,29 +2077,27 @@ _render_mini_metrics(
         ("Search calls avoided", _format_int(tavily_avoided)),
     ]
 )
-with st.expander("Cost details", expanded=False):
-    _render_cost_hero(
-        provider_spend=provider_spend,
-        lifetime_openai_billing=lifetime_openai_billing,
-        recent_openai_billing=recent_openai_billing,
-        tavily_billing=tavily_billing,
-        local_openai_estimate=local_openai_estimate,
-        total_tokens=int(run_totals.get("total_tokens") or 0),
-        openai_calls=int(run_totals.get("openai_calls") or 0),
-        last_api_calls=last_api_calls,
-        last_run_local_openai_estimate=last_run_local_openai_estimate,
-        model_name=str(runtime_settings.openai_model),
-    )
-    _render_summary_card(
-        "Provider setup",
-        [
-            ("OpenAI billing", _billing_status(lifetime_openai_billing)),
-            ("Billing start", str(lifetime_openai_billing.window_start_label or "Unavailable")),
-            ("Tavily billing", f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"),
-            ("Tavily credits remaining", _format_int(tavily_billing.free_credits_remaining)),
-            ("Streamlit Community Cloud hosting", _format_currency(provider_spend.hosting_billed_usd)),
-        ],
-    )
+_render_cost_hero(
+    provider_spend=provider_spend,
+    lifetime_openai_billing=lifetime_openai_billing,
+    recent_openai_billing=recent_openai_billing,
+    tavily_billing=tavily_billing,
+    local_openai_estimate=local_openai_estimate,
+    total_tokens=int(run_totals.get("total_tokens") or 0),
+    openai_calls=int(run_totals.get("openai_calls") or 0),
+    last_api_calls=last_api_calls,
+    last_run_local_openai_estimate=last_run_local_openai_estimate,
+    model_name=str(runtime_settings.openai_model),
+)
+_render_summary_card(
+    "Billing source",
+    [
+        ("OpenAI", _billing_status(lifetime_openai_billing)),
+        ("Billing start", str(lifetime_openai_billing.window_start_label or "Unavailable")),
+        ("Tavily", f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"),
+        ("Hosting", f"Streamlit Community Cloud, {_format_currency(provider_spend.hosting_billed_usd)}"),
+    ],
+)
 
 if frame.empty:
     st.warning("Start by loading the Manifest list. No paid APIs are used in the first screen.")
@@ -2224,534 +2109,27 @@ _render_prospect_cards(
     "No AI-scored prospects yet. Run the evidence cascade first.",
 )
 
-with st.expander("Why companies moved through the funnel", expanded=False):
-    cascade_detail_rows = [
-        ("API-eligible companies", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
-        ("Homepage evidence attempted", _format_int(cascade_summary.get("homepage_attempted") or 0)),
-        ("Accepted domains", _format_int(cascade_summary.get("accepted_domains") or 0)),
-        ("Provisional domains", _format_int(cascade_summary.get("provisional_domains") or 0)),
-        ("Unresolved domains", _format_int(cascade_summary.get("unresolved_domains") or 0)),
-        ("Homepage-positive companies", _format_int(cascade_summary.get("score_from_homepage") or 0)),
-        ("Soft-excluded", _format_int(cascade_summary.get("soft_excluded") or 0)),
-        ("Data gaps", _format_int(cascade_summary.get("data_gaps") or 0)),
-    ]
-    paid_avoidance_rows = [
-        ("Search calls avoided", _format_int(tavily_avoided)),
-        ("Needs search", _format_int(cascade_summary.get("needs_tavily") or 0)),
-        ("Estimated search credits saved", _format_int(tavily_avoided)),
-        ("Estimated search cost saved", _format_currency(tavily_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0))),
-    ]
-    cols = st.columns((1, 1))
-    with cols[0]:
-        _render_summary_card("Evidence cascade", cascade_detail_rows)
-    with cols[1]:
-        _render_summary_card("Search avoided", paid_avoidance_rows)
-
-    route_cols = st.columns(2)
-    with route_cols[0]:
-        _render_route_examples(
-            "Homepage evidence sufficient",
-            db.homepage_route_examples(conn, route="score_from_homepage", limit=3),
-        )
-        _render_route_examples(
-            "Data gaps",
-            db.homepage_route_examples(conn, route="low_priority_data_gap", limit=3),
-        )
-    with route_cols[1]:
-        _render_route_examples(
-            "Needs search",
-            db.homepage_route_examples(conn, route="needs_tavily", limit=3),
-        )
-        _render_route_examples(
-            "Soft-exclude",
-            db.homepage_route_examples(conn, route="soft_exclude", limit=3),
-        )
-
-    audit_frame = _audit_sample_frame(db.false_negative_audit_sample(conn, limit=12, mode=verify_mode))
-    st.markdown("<div class='section-label'>False-negative audit sample</div>", unsafe_allow_html=True)
-    if audit_frame.empty:
-        st.markdown("<div class='empty-state'>No audit samples yet.</div>", unsafe_allow_html=True)
-    else:
-        _render_table(
-            audit_frame,
-            [
-                ("canonical_name", "Company", "company"),
-                ("audit_reason", "Audit reason", "text"),
-                ("route_decision", "Route", "label"),
-                ("domain_confidence_display", "Domain confidence", "text"),
-                ("evidence_snippet", "Evidence snippet", "text"),
-            ],
-            "No audit samples yet.",
-        )
-
-with st.expander("Company detail", expanded=False):
-    detail_source = prospects if not prospects.empty else weighted_frame
-    if detail_source.empty:
-        st.warning("No companies available.")
-    else:
-        selected_company = st.selectbox("Company", detail_source["canonical_name"].tolist())
-        selected_row = detail_source[detail_source["canonical_name"] == selected_company].iloc[0]
-        detail_cols = st.columns(4)
-        detail_cols[0].metric("Fit score", f"{int(selected_row['weighted_score'])}/100")
-        detail_cols[1].metric("WV edge", f"{int(selected_row['wittington_edge'])}/20")
-        detail_cols[2].metric("Type", str(selected_row.get("company_type_display") or "Needs evidence"))
-        detail_cols[3].metric("Confidence", str(selected_row.get("confidence_display") or "Low"))
-        st.markdown(
-            "<div class='detail-box'>"
-            f"<div class='detail-title'>{html.escape(_clean_ui_text(selected_row['canonical_name']))}</div>"
-            f"<div class='detail-text'><strong>Why ranked:</strong> {html.escape(_clean_ui_text(selected_row.get('rationale') or 'No rationale yet.'))}</div>"
-            f"<div class='detail-text'><strong>Evidence:</strong> {html.escape(_clean_ui_text(selected_row.get('evidence_summary') or 'No external evidence yet.'))}</div>"
-            f"<div class='detail-text'><strong>Source:</strong> {html.escape(_clean_ui_text(selected_row.get('evidence_source_display') or 'None'))}</div>"
-            f"<div class='detail-text'><strong>Data gap or route reason:</strong> {html.escape(_clean_ui_text(selected_row.get('homepage_route_reason') or selected_row.get('homepage_fetch_error') or 'No route reason recorded.'))}</div>"
-            f"<div class='detail-text'><strong>Evidence snippet:</strong> {html.escape(_clean_ui_text(_truncate(selected_row.get('homepage_evidence_text') or selected_row.get('evidence_summary') or 'No evidence snippet available.', 260)))}</div>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-
-with st.expander("CSV exports and source sample", expanded=False):
-    source_export = weighted_frame[
+st.markdown("<div class='section-label'>Evidence routing</div>", unsafe_allow_html=True)
+cols = st.columns((1, 1))
+with cols[0]:
+    _render_summary_card(
+        "Cascade counts",
         [
-            "raw_name",
-            "canonical_name",
-            "source_status",
-            "deterministic_type_display",
-            "sector_tags_text",
-            "weighted_score",
-            "duplicate_count",
-            "deterministic_exclusion_reason",
-        ]
-    ].rename(
-        columns={
-            "raw_name": "Raw attendee entry",
-            "canonical_name": "Cleaned company",
-            "source_status": "Status",
-            "deterministic_type_display": "First screen",
-            "sector_tags_text": "Sectors",
-            "weighted_score": "Screen score",
-            "duplicate_count": "Rows",
-            "deterministic_exclusion_reason": "Filter reason",
-        }
+            ("API-eligible", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
+            ("Homepage checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
+            ("Homepage sufficient", _format_int(cascade_summary.get("score_from_homepage") or 0)),
+            ("Needs search", _format_int(cascade_summary.get("needs_tavily") or 0)),
+            ("Data gaps", _format_int(cascade_summary.get("data_gaps") or 0)),
+        ],
     )
-    prospect_export = prospects[
+with cols[1]:
+    _render_summary_card(
+        "Cost saved",
         [
-            "rank",
-            "canonical_name",
-            "weighted_score",
-            "company_type_display",
-            "confidence_display",
-            "evidence_source_display",
-            "sector_tags_text",
-            "website",
-            "primary_source_url",
-            "rationale",
-            "evidence_summary",
-        ]
-    ].rename(
-        columns={
-            "rank": "Rank",
-            "canonical_name": "Company",
-            "weighted_score": "Fit score",
-            "company_type_display": "Type",
-            "confidence_display": "Confidence",
-            "evidence_source_display": "Evidence source",
-            "sector_tags_text": "Sectors",
-            "website": "Website",
-            "primary_source_url": "Primary source",
-            "rationale": "Rationale",
-            "evidence_summary": "Evidence summary",
-        }
+            ("Search calls avoided", _format_int(tavily_avoided)),
+            ("Search credits saved", _format_int(tavily_avoided)),
+            ("Estimated search cost saved", _format_currency(tavily_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0))),
+        ],
     )
-    export_cols = st.columns(2)
-    export_cols[0].download_button(
-        "Download source CSV",
-        data=source_export.to_csv(index=False),
-        file_name="manifest_source_list.csv",
-        mime="text/csv",
-    )
-    export_cols[1].download_button(
-        "Download prospects CSV",
-        data=prospect_export.to_csv(index=False),
-        file_name="manifest_verified_prospects.csv",
-        mime="text/csv",
-    )
-    _render_source_cards(source_rows, "No source rows loaded.")
 
 st.stop()
-
-if simple_demo_view:
-    _render_mini_metrics(
-        [
-            ("Unique companies", _format_int(metrics["unique_companies"])),
-            ("Candidates", _format_int(candidate_count)),
-            ("Evidence enriched", _format_int(metrics["enriched"])),
-            ("Verified prospects", _format_int(len(prospects))),
-        ]
-    )
-    billing_context = st.expander("Billing and technical details", expanded=False)
-else:
-    billing_context = st.container()
-
-with billing_context:
-    _render_cost_hero(
-        provider_spend=provider_spend,
-        lifetime_openai_billing=lifetime_openai_billing,
-        recent_openai_billing=recent_openai_billing,
-        tavily_billing=tavily_billing,
-        local_openai_estimate=local_openai_estimate,
-        total_tokens=int(run_totals.get("total_tokens") or 0),
-        openai_calls=int(run_totals.get("openai_calls") or 0),
-        last_api_calls=last_api_calls,
-        last_run_local_openai_estimate=last_run_local_openai_estimate,
-        model_name=str(runtime_settings.openai_model),
-    )
-    summary_cols = st.columns((1, 1))
-    with summary_cols[0]:
-        _render_summary_card(
-            "Source and prospect status",
-            [
-                ("Source rows", f"{_format_int(metrics['raw_companies'])} raw, {_format_int(metrics['unique_companies'])} unique"),
-                ("Candidates after rule screen", f"{_format_int(candidate_count)} ({_pct(candidate_count, metrics['unique_companies'])} of unique)"),
-                ("API-scored companies", _format_int(metrics["openai_scored"])),
-                ("Verified prospects shown", _format_int(len(prospects))),
-            ],
-        )
-    with summary_cols[1]:
-        _render_summary_card(
-            "Cost controls",
-            [
-                ("OpenAI billing", _billing_status(lifetime_openai_billing)),
-                ("Billing start", str(lifetime_openai_billing.window_start_label or "Unavailable")),
-                ("Search billing", f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"),
-                ("Search credits remaining", _format_int(tavily_billing.free_credits_remaining)),
-                ("Streamlit Cloud hosting", _format_currency(provider_spend.hosting_billed_usd)),
-            ],
-        )
-
-if frame.empty:
-    st.warning("No companies loaded yet. Use Prepare source list to load and classify the Manifest attendee file.")
-else:
-    cascade_summary = db.homepage_evidence_summary(conn, mode=verify_mode)
-    tavily_avoided = int(cascade_summary.get("score_from_homepage") or 0)
-    cascade_detail_rows = [
-        ("API-eligible companies", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
-        ("Homepage evidence attempted", _format_int(cascade_summary.get("homepage_attempted") or 0)),
-        ("Accepted domains", _format_int(cascade_summary.get("accepted_domains") or 0)),
-        ("Provisional domains", _format_int(cascade_summary.get("provisional_domains") or 0)),
-        ("Unresolved domains", _format_int(cascade_summary.get("unresolved_domains") or 0)),
-        ("Homepage-positive companies", _format_int(cascade_summary.get("score_from_homepage") or 0)),
-        ("Soft-excluded", _format_int(cascade_summary.get("soft_excluded") or 0)),
-        ("Data gaps", _format_int(cascade_summary.get("data_gaps") or 0)),
-    ]
-    paid_avoidance_rows = [
-        ("Search calls avoided", _format_int(tavily_avoided)),
-        ("Needs search", _format_int(cascade_summary.get("needs_tavily") or 0)),
-        ("Estimated paid calls avoided", _format_int(tavily_avoided)),
-        ("Estimated search credits saved", _format_int(tavily_avoided)),
-        ("Estimated search cost saved", _format_currency(tavily_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0))),
-    ]
-    if simple_demo_view:
-        st.markdown("<div class='section-label'>Evidence Cascade</div>", unsafe_allow_html=True)
-        _render_mini_metrics(
-            [
-                ("Homepage tried", _format_int(cascade_summary.get("homepage_attempted") or 0)),
-                ("Search avoided", _format_int(tavily_avoided)),
-                ("Needs search", _format_int(cascade_summary.get("needs_tavily") or 0)),
-                ("Data gaps", _format_int(cascade_summary.get("data_gaps") or 0)),
-            ]
-        )
-        with st.expander("Show full cascade counts", expanded=False):
-            detail_cols = st.columns((1, 1))
-            with detail_cols[0]:
-                _render_summary_card("Evidence Cascade Summary", cascade_detail_rows)
-            with detail_cols[1]:
-                _render_summary_card("Paid Calls Avoided", paid_avoidance_rows)
-    else:
-        cascade_cols = st.columns((1, 1))
-        with cascade_cols[0]:
-            _render_summary_card("Evidence Cascade Summary", cascade_detail_rows)
-        with cascade_cols[1]:
-            _render_summary_card("Paid Calls Avoided", paid_avoidance_rows)
-
-    overview_tab, source_tab, prospects_tab, detail_tab = st.tabs(
-        ["Overview", "Source list", "Verified prospects", "Company detail"]
-    )
-
-    with overview_tab:
-        funnel_df = pd.DataFrame(
-            {
-                "Stage": ["Unique names", "Screened candidates", "Evidence enriched", "API-scored"],
-                "Companies": [
-                    metrics["unique_companies"],
-                    candidate_count,
-                    metrics["enriched"],
-                    metrics["openai_scored"],
-                ],
-            }
-        )
-
-        if simple_demo_view:
-            st.markdown("<div class='section-label'>Top verified prospects</div>", unsafe_allow_html=True)
-            _render_prospect_cards(
-                prospects.head(6),
-                "No verified prospects yet. Start with the homepage evidence preview, then run a paid batch only if needed.",
-            )
-
-        route_context = st.expander("Show evidence examples and audit sample", expanded=not simple_demo_view)
-        with route_context:
-            st.markdown("<div class='section-label'>Evidence route examples</div>", unsafe_allow_html=True)
-            st.markdown(
-                "<div class='quiet-note'>Cached homepage/domain decisions shown here use no Tavily or OpenAI calls.</div>",
-                unsafe_allow_html=True,
-            )
-            route_cols = st.columns(2)
-            with route_cols[0]:
-                _render_route_examples(
-                    "Homepage-positive",
-                    db.homepage_route_examples(conn, route="score_from_homepage", limit=3),
-                )
-                _render_route_examples(
-                    "Data gaps",
-                    db.homepage_route_examples(conn, route="low_priority_data_gap", limit=3),
-                )
-            with route_cols[1]:
-                _render_route_examples(
-                    "Needs search",
-                    db.homepage_route_examples(conn, route="needs_tavily", limit=3),
-                )
-                _render_route_examples(
-                    "Soft-exclude",
-                    db.homepage_route_examples(conn, route="soft_exclude", limit=3),
-                )
-
-            audit_frame = _audit_sample_frame(db.false_negative_audit_sample(conn, limit=12, mode=verify_mode))
-            st.markdown("<div class='section-label'>False-negative audit sample</div>", unsafe_allow_html=True)
-            st.markdown(
-                "<div class='quiet-note'>Sampled uncertain or excluded rows for later recall checks. This is an audit queue, not a hard rejection list.</div>",
-                unsafe_allow_html=True,
-            )
-            if audit_frame.empty:
-                st.markdown("<div class='empty-state'>No audit samples yet. Run homepage evidence preview or a verification batch to populate this list.</div>", unsafe_allow_html=True)
-            else:
-                _render_table(
-                    audit_frame,
-                    [
-                        ("canonical_name", "Company", "company"),
-                        ("audit_reason", "Audit reason", "text"),
-                        ("route_decision", "Route", "label"),
-                        ("domain_confidence_display", "Domain confidence", "text"),
-                        ("positive_signals", "Positive signals", "text"),
-                        ("negative_signals", "Negative signals", "text"),
-                        ("evidence_snippet", "Evidence snippet", "text"),
-                    ],
-                    "No audit samples yet.",
-                )
-
-        chart_context = st.expander("Show charts and internal estimates", expanded=not simple_demo_view)
-        with chart_context:
-            st.markdown("<div class='section-label'>Source to prospects</div>", unsafe_allow_html=True)
-            st.altair_chart(
-                _horizontal_bar_chart(funnel_df, "Stage", "Companies", height=320, sort=None),
-                use_container_width=True,
-            )
-            st.divider()
-
-            st.markdown("<div class='section-label'>Fit score distribution</div>", unsafe_allow_html=True)
-            st.altair_chart(
-                _horizontal_bar_chart(_score_band_frame(weighted_frame), "Score band", "Companies", height=340, sort=None),
-                use_container_width=True,
-            )
-            st.divider()
-
-            st.markdown("<div class='section-label'>Sector mix</div>", unsafe_allow_html=True)
-            st.altair_chart(
-                _horizontal_bar_chart(_sector_frame(weighted_frame), "Sector", "Companies", height=380),
-                use_container_width=True,
-            )
-            st.divider()
-
-            st.markdown("<div class='section-label'>Company types</div>", unsafe_allow_html=True)
-            st.altair_chart(
-                _horizontal_bar_chart(_type_frame(weighted_frame), "Type", "Companies", height=320),
-                use_container_width=True,
-            )
-            st.divider()
-
-            st.markdown("<div class='section-label'>Internal estimates and shadow values</div>", unsafe_allow_html=True)
-            st.markdown(
-                "<div class='quiet-note'>These values support planning and projections. They are separate from provider-billed costs.</div>",
-                unsafe_allow_html=True,
-            )
-            st.altair_chart(
-                _horizontal_bar_chart(_resource_cost_frame(metrics, settings), "Resource", "Estimated USD", height=220),
-                use_container_width=True,
-            )
-            st.divider()
-
-            cost_stage_df = _stage_cost_frame(metrics, settings)
-            st.markdown("<div class='section-label'>Internal token-rate estimate by stage</div>", unsafe_allow_html=True)
-            st.altair_chart(
-                _horizontal_bar_chart(cost_stage_df, "Stage", "Estimated USD", height=220, sort=None),
-                use_container_width=True,
-            )
-
-        if not simple_demo_view:
-            st.divider()
-            st.markdown("<div class='section-label'>Top verified prospects</div>", unsafe_allow_html=True)
-            _render_prospect_cards(
-                prospects.head(10),
-                "No externally verified prospects yet. Generate a capped batch to populate this list.",
-            )
-
-    with source_tab:
-        st.markdown("<div class='section-label'>Source list</div>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div class='quiet-note'>Showing {_format_int(len(source_rows))} de-duplicated source rows from {_format_int(len(weighted_frame))} unique company names.</div>",
-            unsafe_allow_html=True,
-        )
-        _render_source_cards(
-            source_rows,
-            "No source rows loaded.",
-        )
-        source_export = weighted_frame[
-            [
-                "raw_name",
-                "canonical_name",
-                "source_status",
-                "deterministic_type_display",
-                "sector_tags_text",
-                "weighted_score",
-                "duplicate_count",
-                "deterministic_exclusion_reason",
-            ]
-        ].rename(
-            columns={
-                "raw_name": "Raw attendee entry",
-                "canonical_name": "Cleaned company",
-                "source_status": "Status",
-                "deterministic_type_display": "Rule screen",
-                "sector_tags_text": "Sectors",
-                "weighted_score": "Screen score",
-                "duplicate_count": "Rows",
-                "deterministic_exclusion_reason": "Filter reason",
-            }
-        )
-        st.download_button(
-            "Download source CSV",
-            data=source_export.to_csv(index=False),
-            file_name="manifest_source_list.csv",
-            mime="text/csv",
-        )
-
-    with prospects_tab:
-        st.markdown("<div class='section-label'>Verified prospects</div>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div class='quiet-note'>Showing {_format_int(len(visible_prospects))} refined prospects that have external evidence and API scoring.</div>",
-            unsafe_allow_html=True,
-        )
-        _render_prospect_cards(
-            visible_prospects,
-            "No verified prospects match the current filters.",
-        )
-        prospect_export = prospects[
-            [
-                "rank",
-                "canonical_name",
-                "weighted_score",
-                "total_score",
-                "company_type_display",
-                "confidence_display",
-                "evidence_source_display",
-                "sector_tags_text",
-                "website",
-                "primary_source_url",
-                "homepage_resolved_url",
-                "homepage_domain_confidence",
-                "homepage_evidence_quality",
-                "homepage_positive_signals_text",
-                "homepage_negative_signals_text",
-                "homepage_route_decision",
-                "homepage_route_reason",
-                "rationale",
-                "evidence_summary",
-                "source_urls",
-            ]
-        ].rename(
-            columns={
-                "rank": "Rank",
-                "canonical_name": "Company",
-                "weighted_score": "Fit score",
-                "total_score": "Stored score",
-                "company_type_display": "Type",
-                "confidence_display": "Confidence",
-                "evidence_source_display": "Evidence source",
-                "sector_tags_text": "Sectors",
-                "website": "Website",
-                "primary_source_url": "Primary source",
-                "homepage_resolved_url": "Homepage source",
-                "homepage_domain_confidence": "Homepage domain confidence",
-                "homepage_evidence_quality": "Homepage evidence confidence",
-                "homepage_positive_signals_text": "Homepage positive signals",
-                "homepage_negative_signals_text": "Homepage negative signals",
-                "homepage_route_decision": "Homepage route",
-                "homepage_route_reason": "Homepage route reason",
-                "rationale": "Rationale",
-                "evidence_summary": "Evidence summary",
-                "source_urls": "Source URLs",
-            }
-        )
-        st.download_button(
-            "Download prospects CSV",
-            data=prospect_export.to_csv(index=False),
-            file_name="manifest_verified_prospects.csv",
-            mime="text/csv",
-        )
-
-    with detail_tab:
-        st.markdown("<div class='section-label'>Company detail</div>", unsafe_allow_html=True)
-        detail_source = filtered if not filtered.empty else weighted_frame
-        if detail_source.empty:
-            st.warning("No companies match the current filters.")
-        else:
-            selected_company = st.selectbox("Company", detail_source["canonical_name"].tolist())
-            selected_row = detail_source[detail_source["canonical_name"] == selected_company].iloc[0]
-
-            detail_cols = st.columns(5)
-            detail_cols[0].metric("Fit score", f"{int(selected_row['weighted_score'])}/100")
-            detail_cols[1].metric("Stored score", f"{int(selected_row['total_score'])}/100")
-            detail_cols[2].metric("WV edge", f"{int(selected_row['wittington_edge'])}/20")
-            detail_cols[3].metric("Type", str(selected_row.get("company_type_display") or "Needs evidence"))
-            detail_cols[4].metric("Confidence", str(selected_row.get("confidence_display") or "Low"))
-
-            st.markdown(
-                "<div class='detail-box'>"
-                f"<div class='detail-title'>{html.escape(_clean_ui_text(selected_row['canonical_name']))}</div>"
-                f"<div class='detail-text'><strong>Rationale:</strong> {html.escape(_clean_ui_text(selected_row.get('rationale') or 'No rationale yet.'))}</div>"
-                f"<div class='detail-text'><strong>Evidence:</strong> {html.escape(_clean_ui_text(selected_row.get('evidence_summary') or 'No external evidence yet.'))}</div>"
-                f"<div class='detail-text'><strong>Evidence source:</strong> {html.escape(_clean_ui_text(selected_row.get('evidence_source_display') or 'None'))}</div>"
-                f"<div class='detail-text'><strong>Homepage route:</strong> {html.escape(_clean_ui_text(_humanize(selected_row.get('homepage_route_decision') or 'not recorded')))}</div>"
-                f"<div class='detail-text'><strong>Route reason:</strong> {html.escape(_clean_ui_text(selected_row.get('homepage_route_reason') or selected_row.get('homepage_fetch_error') or 'No route reason recorded.'))}</div>"
-                f"<div class='detail-text'><strong>Positive signals:</strong> {_signal_pills(selected_row.get('homepage_positive_signals'), 'Not captured')}</div>"
-                f"<div class='detail-text'><strong>Negative signals:</strong> {_signal_pills(selected_row.get('homepage_negative_signals'), 'Not captured')}</div>"
-                f"<div class='detail-text'><strong>Evidence snippet:</strong> {html.escape(_clean_ui_text(_truncate(selected_row.get('homepage_evidence_text') or selected_row.get('evidence_summary') or 'No evidence snippet available.', 260)))}</div>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-
-            component_df = pd.DataFrame(
-                [
-                    {"Criterion": _humanize(key), "Score": int(selected_row.get(key) or 0), "Max": COMPONENT_MAX[key], "Weight": weights[key]}
-                    for key in DEFAULT_WEIGHTS
-                ]
-            )
-            st.markdown("<div class='section-label'>Score components</div>", unsafe_allow_html=True)
-            st.altair_chart(
-                _horizontal_bar_chart(component_df, "Criterion", "Score", height=260, sort=None),
-                use_container_width=True,
-            )
-
-            urls = selected_row.get("top_urls") or []
-            titles = selected_row.get("top_titles") or []
-            snippets = selected_row.get("top_snippets") or []
-            if urls:
-                st.markdown("<div class='section-label'>Retrieved evidence</div>", unsafe_allow_html=True)
-                st.markdown(_evidence_cards_html(urls, titles, snippets), unsafe_allow_html=True)

@@ -15,8 +15,7 @@ Hosted app: https://wv-manifest-prospecting-tool-b8jadagmhgsh8wirbknjb9.streamli
 - Wittington project lifetime-to-date OpenAI billing, recent OpenAI billing, last fetch time, cache status, and billing-window metadata.
 - Pre-run cost and runtime confirmation before paid provider calls begin.
 - Concurrent Tavily enrichment and OpenAI scoring with bounded retry/backoff for rate limits and transient provider errors.
-- Evidence inspection section with route examples and a false-negative audit sample.
-- CSV exports for source rows and verified prospects.
+- Visible evidence-routing counts for homepage checks, search-needed rows, data gaps, and search calls avoided.
 
 ## Tech Stack
 
@@ -81,13 +80,12 @@ streamlit run app.py
 
 Use the dashboard in this order:
 
-1. Click **1. Load and screen source data**.
+1. Click **Load and screen Manifest list**.
 2. Review the **Pipeline** section to see how the raw Manifest list narrows into API-eligible companies.
-3. Click **2. Review evidence and cost estimate**.
+3. Review the automatically displayed run estimate: companies, Tavily search calls, OpenAI scoring calls, estimated provider cost, runtime, and tokens.
 4. Click **Preview homepage evidence - no paid APIs** to show the low-cost homepage/domain layer before paid search.
-5. Review the run estimate: companies, Tavily search calls, OpenAI scoring calls, estimated provider cost, search calls avoided, and tokens.
-6. Click **Confirm paid search and AI run** only after the estimate is acceptable.
-7. Review **Ranked prospects**, **Cost and usage**, and **Why companies moved through the funnel**.
+5. Click **Confirm paid search and AI run** only after the estimate is acceptable.
+6. Review **Ranked prospects**, **Cost and usage**, and **Evidence routing**.
 
 For a command-line run:
 
