@@ -399,6 +399,41 @@ CUSTOM_CSS = """
     margin-top: 0.22rem;
     max-width: 620px;
   }
+  .control-group {
+    border-top: 1px solid #edf0f4;
+    margin: 0.9rem 0 1rem 0;
+    padding-top: 0.9rem;
+  }
+  .control-title {
+    color: #202332;
+    font-size: 0.98rem;
+    font-weight: 760;
+    line-height: 1.35;
+    margin-bottom: 0.18rem;
+  }
+  .control-copy {
+    color: #697386;
+    font-size: 0.86rem;
+    line-height: 1.45;
+    margin-bottom: 0.65rem;
+  }
+  .stage-table-block {
+    border-top: 1px solid #edf0f4;
+    margin: 1.05rem 0 1rem 0;
+    padding-top: 0.95rem;
+  }
+  .stage-table-title {
+    color: #202332;
+    font-size: 1rem;
+    font-weight: 760;
+    line-height: 1.35;
+  }
+  .stage-table-note {
+    color: #697386;
+    font-size: 0.86rem;
+    line-height: 1.45;
+    margin: 0.16rem 0 0.65rem 0;
+  }
   .guided-fact-stack {
     border-top: 1px solid #edf0f4;
     margin: 0.75rem 0 1rem 0;
@@ -681,21 +716,20 @@ CUSTOM_CSS = """
     color: #202332;
   }
   .wv-table {
-    border: 1px solid #e5e9ef;
-    border-collapse: separate;
-    border-radius: 8px;
+    border: 0;
+    border-collapse: collapse;
+    border-radius: 0;
     border-spacing: 0;
-    overflow: hidden;
     table-layout: fixed;
     width: 100%;
   }
   .wv-table th {
-    background: #f8fafc;
+    background: #ffffff;
     border-bottom: 1px solid #e5e9ef;
     color: #687084;
     font-size: 0.78rem;
     font-weight: 700;
-    padding: 0.72rem 0.65rem;
+    padding: 0.6rem 0;
     text-align: left;
     text-transform: uppercase;
     word-break: normal;
@@ -705,7 +739,7 @@ CUSTOM_CSS = """
     color: #272b3a;
     font-size: 0.88rem;
     line-height: 1.35;
-    padding: 0.68rem 0.65rem;
+    padding: 0.64rem 0.55rem 0.64rem 0;
     vertical-align: top;
     white-space: normal;
     overflow-wrap: anywhere;
@@ -944,14 +978,6 @@ CUSTOM_CSS = """
       font-size: 0.78rem;
       padding: 0.52rem 0.45rem;
     }
-    .source-table th:nth-child(1),
-    .source-table td:nth-child(1),
-    .source-table th:nth-child(3),
-    .source-table td:nth-child(3),
-    .source-table th:nth-child(7),
-    .source-table td:nth-child(7) {
-      display: none;
-    }
     .prospect-card {
       grid-template-columns: 1fr;
     }
@@ -1096,13 +1122,13 @@ def _safe_link(url: str | None, label: str) -> str:
     return f"<a href='{html.escape(clean_url, quote=True)}' target='_blank' rel='noopener noreferrer'>{safe_label}</a>"
 
 
-def _reset_database(conn) -> None:
+def _clear_processing_cache(conn) -> None:
     conn.executescript(
         """
         DELETE FROM scores;
         DELETE FROM enrichments;
+        DELETE FROM homepage_evidence;
         DELETE FROM companies;
-        DELETE FROM runs;
         """
     )
     conn.commit()
@@ -1164,6 +1190,28 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["confidence_display"] = frame["confidence"].apply(_humanize)
     frame["score_source_display"] = frame["score_provider"].apply(_humanize)
     frame["source_status"] = frame["is_candidate"].apply(lambda value: "Kept by rules" if int(value or 0) else "Removed by rules")
+    frame["homepage_route_display"] = frame["homepage_route_decision"].apply(lambda value: _humanize(value) if value else "Not checked")
+    frame["homepage_domain_status_display"] = frame["homepage_domain_status"].apply(lambda value: _humanize(value) if value else "Not checked")
+    frame["homepage_url_display"] = frame.apply(
+        lambda row: row.get("homepage_resolved_url")
+        or row.get("homepage_candidate_domain")
+        or "Not checked",
+        axis=1,
+    )
+    frame["homepage_page_data_status"] = frame.apply(
+        lambda row: "Enough page text for scoring"
+        if float(row.get("homepage_evidence_quality") or 0.0) > 0
+        and str(row.get("homepage_route_decision") or "") == "score_from_homepage"
+        else "Needs web search"
+        if str(row.get("homepage_route_decision") or "") == "needs_tavily"
+        else "No page text saved"
+        if str(row.get("homepage_route_decision") or "") == "data_gap"
+        else "Not checked",
+        axis=1,
+    )
+    frame["score_status_display"] = frame["score_provider"].apply(
+        lambda value: "Scored by OpenAI API" if str(value or "") == "openai" else "Not scored"
+    )
     placeholder_mask = frame["canonical_name"].apply(_is_generic_placeholder)
     if placeholder_mask.any():
         frame.loc[placeholder_mask, "is_candidate"] = 0
@@ -1503,6 +1551,54 @@ def _setting_int(settings, name: str, default: int) -> int:
         return default
 
 
+def _row_count_options(max_count: int) -> list[int]:
+    max_count = max(1, int(max_count or 1))
+    options = {value for value in [10, 100, 1000, max_count] if 1 <= value <= max_count}
+    return sorted(options)
+
+
+def _row_count_label(value: int, max_count: int) -> str:
+    if int(value) == int(max_count):
+        return f"All rows kept after rules ({_format_int(max_count)})"
+    return f"{_format_int(value)} rows"
+
+
+def _render_processing_controls(candidate_count: int, current_cap: int) -> int:
+    if candidate_count <= 0:
+        st.markdown(
+            "<div class='control-group'>"
+            "<div class='control-title'>Rows to process</div>"
+            "<div class='control-copy'>Load the Manifest list first. The row-count choices use the rows that remain after duplicate merge and rule filtering.</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        return max(1, int(current_cap or 1))
+
+    options = _row_count_options(candidate_count)
+    current_cap = max(1, min(int(current_cap or candidate_count), candidate_count))
+    if current_cap not in options:
+        current_cap = 100 if 100 in options else options[-1]
+    index = options.index(current_cap)
+    st.markdown(
+        "<div class='control-group'>"
+        "<div class='control-title'>Rows to process after rule filtering</div>"
+        "<div class='control-copy'>This sets the maximum number of companies that can move through company-page checks, Tavily Search API, and OpenAI API scoring.</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    selected_cap = st.radio(
+        "Rows to process after rule filtering",
+        options,
+        index=index,
+        format_func=lambda value: _row_count_label(int(value), candidate_count),
+        label_visibility="collapsed",
+        horizontal=False,
+        key="prospect_cap_choice",
+    )
+    st.session_state["prospect_cap"] = int(selected_cap)
+    return int(selected_cap)
+
+
 def _local_openai_estimate_usd(metrics: dict, settings) -> float:
     openai_stage_total = 0.0
     for row in metrics.get("cost_by_stage", []):
@@ -1810,6 +1906,10 @@ def _table_html(frame: pd.DataFrame, columns: list[tuple[str, str, str]], empty_
                 cell = _safe_link(str(value or ""), "Open")
             elif kind == "number":
                 cell = _format_int(value)
+            elif kind == "currency":
+                cell = _format_currency(value)
+            elif kind == "percent":
+                cell = _format_percent(value)
             else:
                 cell = html.escape(_clean_ui_text(value))
             body.append(f"<td>{cell}</td>")
@@ -1820,6 +1920,36 @@ def _table_html(frame: pd.DataFrame, columns: list[tuple[str, str, str]], empty_
 
 def _render_table(frame: pd.DataFrame, columns: list[tuple[str, str, str]], empty_message: str) -> None:
     st.markdown(_table_html(frame, columns, empty_message), unsafe_allow_html=True)
+
+
+def _render_stage_table(
+    title: str,
+    note: str,
+    frame: pd.DataFrame,
+    columns: list[tuple[str, str, str]],
+    empty_message: str,
+) -> None:
+    st.markdown(
+        "<div class='stage-table-block'>"
+        f"<div class='stage-table-title'>{html.escape(_clean_ui_text(title))}</div>"
+        f"<div class='stage-table-note'>{html.escape(_clean_ui_text(note))}</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    _render_table(frame, columns, empty_message)
+
+
+def _first_rows(frame: pd.DataFrame, count: int = 8) -> pd.DataFrame:
+    if frame.empty:
+        return frame.copy()
+    return frame.head(count).copy()
+
+
+def _candidate_rows(frame: pd.DataFrame, count: int = 8) -> pd.DataFrame:
+    if frame.empty:
+        return frame.copy()
+    candidates = frame[frame["is_candidate"].eq(1)].copy()
+    return candidates.head(count).copy()
 
 
 def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
@@ -1991,8 +2121,17 @@ verify_mode = st.session_state.get("verify_mode", "balanced")
 if verify_mode not in VERIFY_MODE_PRESETS:
     verify_mode = "balanced"
 model_pricing = _selected_model_pricing(selected_model)
-prospect_cap = int(st.session_state.get("prospect_cap", min(settings.max_score, 100)))
+prospect_cap = int(st.session_state.get("prospect_cap", st.session_state.get("prospect_cap_choice", min(settings.max_score, 100))))
 runtime_settings = _settings_for_run(settings, selected_model, model_pricing["input"], model_pricing["output"])
+
+if st.session_state.pop("clear_processing_cache_requested", False):
+    _clear_processing_cache(conn)
+    st.session_state["last_action"] = {
+        "message": "Cleared company rows, company-page data, Tavily Search API results, and OpenAI API scores. Run history and API cost records were kept.",
+        "level": "success",
+    }
+    frame, metrics = _load_frame_and_metrics(conn)
+    st.rerun()
 
 if st.session_state.pop("load_source_requested", False):
     load_result = _run_and_store("Loading attendee names...", lambda: load_attendees(conn, settings))
@@ -2101,6 +2240,12 @@ prospects = weighted_frame[weighted_frame["is_refined_prospect"]].copy() if not 
 visible_prospects = filtered if show_verified_only else prospects
 source_rows = weighted_frame.head(int(source_rows_shown)).copy()
 candidate_count = int(weighted_frame["is_candidate"].sum()) if not weighted_frame.empty else int(metrics.get("candidates") or 0)
+raw_company_count = int(metrics.get("raw_companies") or 0)
+unique_company_count = int(metrics.get("unique_companies") or 0)
+duplicate_rows_merged = max(0, raw_company_count - unique_company_count)
+rule_removed_count = max(0, unique_company_count - candidate_count)
+prospect_cap_limit = max(1, candidate_count or unique_company_count or int(settings.max_score or 1))
+prospect_cap = max(1, min(int(prospect_cap or prospect_cap_limit), prospect_cap_limit))
 run_totals = metrics.get("run_totals") or {}
 last_run = metrics.get("last_run") or {}
 last_api_calls = int(last_run.get("tavily_calls") or 0) + int(last_run.get("openai_calls") or 0)
@@ -2139,10 +2284,6 @@ pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(p
 pending_mode = pending_verify_run.get("mode") if pending_verify_run else verify_mode
 broad_universe_pending = int((pending_verify_run or {}).get("broad_candidate_universe") or metrics.get("candidates") or 0)
 unique_universe_pending = int((pending_verify_run or {}).get("unique_company_universe") or metrics.get("unique_companies") or 0)
-raw_company_count = int(metrics.get("raw_companies") or 0)
-unique_company_count = int(metrics.get("unique_companies") or 0)
-duplicate_rows_merged = max(0, raw_company_count - unique_company_count)
-rule_removed_count = max(0, unique_company_count - candidate_count)
 projected_tavily_overage = int((pending_verify_run or {}).get("projected_tavily_overage") or 0)
 tavily_payg_enabled_pending = bool((pending_verify_run or {}).get("tavily_payg_enabled"))
 projected_rows = []
@@ -2172,6 +2313,26 @@ if pending_verify_run:
         ("Companies sent to web search", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
         ("Companies without enough page data", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
     ]
+
+source_table = _first_rows(weighted_frame, 8)
+candidate_table = _candidate_rows(weighted_frame, 8)
+homepage_checked_frame = (
+    weighted_frame[weighted_frame["homepage_route_decision"].astype(str).ne("")].copy()
+    if not weighted_frame.empty
+    else weighted_frame.copy()
+)
+homepage_table = _first_rows(homepage_checked_frame if not homepage_checked_frame.empty else candidate_table, 8)
+selected_batch_table = _candidate_rows(weighted_frame, min(8, int(prospect_cap or 8)))
+scored_table = _first_rows(
+    weighted_frame[weighted_frame["score_provider"].eq("openai")].copy()
+    if not weighted_frame.empty
+    else weighted_frame.copy(),
+    8,
+)
+routing_table = _first_rows(homepage_checked_frame if not homepage_checked_frame.empty else candidate_table, 8)
+cost_stage_table = pd.DataFrame(metrics.get("cost_by_stage") or [])
+if not cost_stage_table.empty:
+    cost_stage_table["run_type_display"] = cost_stage_table["run_type"].apply(_humanize)
 
 slides = [
     {"key": "overview", "label": "Overview", "title": "Manifest list to scored companies.", "copy": "Load company names, remove excluded organization types and placeholder names, check company pages, run web search when page data is incomplete, then score the remaining companies."},
@@ -2211,6 +2372,18 @@ if slide["key"] == "overview":
             ("Results", "Show scored companies, OpenAI API cost, and Tavily Search API cost."),
         ],
     )
+    _render_stage_table(
+        "Current row table",
+        "First rows shown. Move through the slides to see the same company rows become cleaned, filtered, checked, searched, and scored.",
+        source_table,
+        [
+            ("raw_name", "Manifest row text", "company"),
+            ("canonical_name", "Cleaned company name", "company"),
+            ("source_status", "Rule result", "text"),
+            ("score_status_display", "Scoring status", "text"),
+        ],
+        "No company rows loaded yet.",
+    )
 elif slide["key"] == "source":
     _render_mini_metrics(
         [
@@ -2236,6 +2409,17 @@ elif slide["key"] == "source":
             ),
         ]
     )
+    prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
+    st.markdown(
+        "<div class='control-group'>"
+        "<div class='control-title'>Processing cache</div>"
+        "<div class='control-copy'>Clears company rows, company-page data, Tavily Search API results, and OpenAI API scores. Run history and API cost records stay in the database.</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    if st.button("Clear cached company processing data", use_container_width=True):
+        st.session_state["clear_processing_cache_requested"] = True
+        st.rerun()
     _render_summary_card(
         "Rule processing",
         [
@@ -2248,6 +2432,19 @@ elif slide["key"] == "source":
     if workflow_stage == 1 and st.button("Load Manifest list and apply rules", type="primary", use_container_width=True):
         st.session_state["load_source_requested"] = True
         st.rerun()
+    _render_stage_table(
+        "Rows after duplicate merge and rule filtering",
+        "First rows shown. The table keeps the original Manifest text next to the cleaned company name and rule result.",
+        source_table,
+        [
+            ("raw_name", "Manifest row text", "company"),
+            ("canonical_name", "Cleaned company name", "company"),
+            ("duplicate_count", "Rows merged", "number"),
+            ("deterministic_type_display", "Rule category", "text"),
+            ("source_status", "Rule result", "text"),
+        ],
+        "No company rows loaded yet.",
+    )
 elif slide["key"] == "homepage":
     homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
     homepage_scoreable = int(cascade_summary.get("score_from_homepage") or 0)
@@ -2285,28 +2482,18 @@ elif slide["key"] == "homepage":
             ("Next", "Companies without enough page text are sent to web search"),
         ],
     )
-    if pending_verify_run and st.button("Check one company page", type="primary", use_container_width=True):
-        with st.spinner("Checking company page metadata..."):
-            run_deterministic_classification(conn)
-            preview_cap = max(1, min(int(pending_verify_run["cap"]), _setting_int(runtime_settings, "homepage_preview_max_per_click", 1)))
-            preview_settings = replace(
-                runtime_settings,
-                homepage_evidence_max_per_run=preview_cap,
-                homepage_fetch_timeout_seconds=min(float(_setting(runtime_settings, "homepage_fetch_timeout_seconds", 4.0) or 4.0), 1.0),
-            )
-            preview_result = collect_homepage_evidence(
-                conn,
-                preview_settings,
-                preview_cap,
-                False,
-                mode=pending_mode,
-                max_domain_attempts=1,
-            )
-        st.session_state["last_action"] = {
-            "message": f"Checked {_format_int(preview_result.counts.get('processed'))} company page. Search and scoring were not run.",
-            "level": "success",
-        }
-        st.rerun()
+    _render_stage_table(
+        "Rows after company-page checks",
+        "First rows shown. A row stays on page data only when the homepage has enough text for scoring; otherwise the row moves to Tavily Search API.",
+        homepage_table,
+        [
+            ("canonical_name", "Company name", "company"),
+            ("homepage_url_display", "Company page or domain", "text"),
+            ("homepage_domain_status_display", "Domain result", "text"),
+            ("homepage_page_data_status", "Next processing step", "text"),
+        ],
+        "No company-page data saved yet.",
+    )
 elif slide["key"] == "estimate":
     if pending_verify_run:
         _render_mini_metrics(
@@ -2335,6 +2522,18 @@ elif slide["key"] == "estimate":
         )
         _render_summary_card("Run estimate", projected_rows)
         _render_summary_card("Company page and web search counts", cascade_rows)
+        _render_stage_table(
+            "Rows included in the selected batch",
+            "First rows shown. The selected row count controls the estimate above and the maximum rows sent through company-page checks, Tavily Search API, and OpenAI API scoring.",
+            selected_batch_table,
+            [
+                ("canonical_name", "Company name", "company"),
+                ("deterministic_type_display", "Rule category", "text"),
+                ("source_status", "Rule result", "text"),
+                ("score_status_display", "Scoring status", "text"),
+            ],
+            "No rows are available for the selected batch.",
+        )
         if st.button("Run search and scoring", type="primary", use_container_width=True):
             st.session_state["active_verify_mode"] = pending_mode
             st.session_state["start_paid_run_requested"] = True
@@ -2378,10 +2577,36 @@ elif slide["key"] == "cost":
         last_run_local_openai_estimate=last_run_local_openai_estimate,
         model_name=str(runtime_settings.openai_model),
     )
+    _render_stage_table(
+        "API run history kept for billing records",
+        "This table is not cleared by the processing-cache button. It keeps the local record of Tavily Search API calls, OpenAI API calls, tokens, and estimated OpenAI token cost.",
+        cost_stage_table,
+        [
+            ("run_type_display", "Run type", "text"),
+            ("tavily_calls", "Tavily Search API calls", "number"),
+            ("openai_calls", "OpenAI API calls", "number"),
+            ("total_tokens", "OpenAI API tokens", "number"),
+            ("estimated_cost_usd", "Estimated OpenAI token cost", "currency"),
+        ],
+        "No API run history recorded yet.",
+    )
 elif slide["key"] == "prospects":
     _render_prospect_cards(
         prospects.head(5),
         "No scored companies yet. Run search and scoring first.",
+    )
+    _render_stage_table(
+        "Rows after OpenAI API scoring",
+        "First rows shown. Scored rows include the total score and the source type used for scoring.",
+        scored_table,
+        [
+            ("rank", "Rank", "number"),
+            ("canonical_name", "Company name", "company"),
+            ("weighted_score", "Total score", "score"),
+            ("company_type_display", "OpenAI company type", "text"),
+            ("evidence_source_display", "Source used for scoring", "text"),
+        ],
+        "No OpenAI-scored rows yet.",
     )
 elif slide["key"] == "routing":
     _render_summary_card(
@@ -2393,6 +2618,18 @@ elif slide["key"] == "routing":
             ("Companies sent to web search", _format_int(cascade_summary.get("needs_tavily") or 0)),
             ("Companies without enough page data", _format_int(cascade_summary.get("data_gaps") or 0)),
         ],
+    )
+    _render_stage_table(
+        "Company-page routing by row",
+        "First rows shown. Each row shows whether page text was enough for scoring or whether Tavily Search API was needed.",
+        routing_table,
+        [
+            ("canonical_name", "Company name", "company"),
+            ("homepage_page_data_status", "Page-data result", "text"),
+            ("homepage_route_display", "Processing route", "text"),
+            ("homepage_route_reason", "Recorded reason", "text"),
+        ],
+        "No company-page routing rows saved yet.",
     )
 
 nav_cols = st.columns((1, 1, 1))
