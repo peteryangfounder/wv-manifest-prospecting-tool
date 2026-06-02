@@ -256,10 +256,6 @@ CUSTOM_CSS = """
     max-width: 860px;
   }
   .slide-progress {
-    align-items: center;
-    display: grid;
-    gap: 0.6rem;
-    grid-template-columns: 1fr auto;
     margin: 0.35rem 0 0.75rem 0;
   }
   .slide-progress-track {
@@ -278,6 +274,7 @@ CUSTOM_CSS = """
     color: var(--wv-muted);
     font-size: 0.82rem;
     font-weight: 700;
+    margin-bottom: 0.3rem;
     white-space: nowrap;
   }
   .slide-progress-label {
@@ -1354,13 +1351,15 @@ def _slide_progress_state(index: int, total: int) -> tuple[float, str]:
 
 
 def _render_slide_progress(index: int, total: int) -> None:
+    if index <= 0:
+        return
     pct, label = _slide_progress_state(index, total)
     st.markdown(
         "<div class='slide-progress'>"
+        f"<div class='slide-progress-text'>{html.escape(label)}</div>"
         "<div class='slide-progress-track'>"
         f"<span class='slide-progress-fill' style='width:{pct:.1f}%'></span>"
         "</div>"
-        f"<div class='slide-progress-text'>{html.escape(label)}</div>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -1668,15 +1667,25 @@ def _render_slide_footer(
 ) -> bool:
     _pct, progress_label = _slide_progress_state(slide_index, slide_count)
     st.markdown("<div class='header-divider'></div>", unsafe_allow_html=True)
-    nav_cols = st.columns((1, 1.35, 1))
-    if nav_cols[0].button("Previous", disabled=slide_index == 0, use_container_width=True, key="slide_previous"):
+    if slide_index == 0:
+        return st.button(
+            action_label,
+            type="primary",
+            disabled=action_disabled,
+            use_container_width=True,
+            key=action_key,
+            help=action_help,
+        )
+
+    nav_cols = st.columns((1, 1.65))
+    if nav_cols[0].button("Previous", use_container_width=True, key="slide_previous"):
         st.session_state["slide_index"] = max(0, slide_index - 1)
         st.rerun()
     nav_cols[1].markdown(
         f"<div class='slide-action-note'>{html.escape(progress_label)}</div>",
         unsafe_allow_html=True,
     )
-    action_clicked = nav_cols[1].button(
+    return nav_cols[1].button(
         action_label,
         type="primary",
         disabled=action_disabled,
@@ -1684,10 +1693,6 @@ def _render_slide_footer(
         key=action_key,
         help=action_help,
     )
-    if nav_cols[2].button("Next", disabled=slide_index >= slide_count - 1, use_container_width=True, key="slide_next"):
-        st.session_state["slide_index"] = min(slide_count - 1, slide_index + 1)
-        st.rerun()
-    return action_clicked
 
 
 def _local_openai_estimate_usd(metrics: dict, settings) -> float:
@@ -2519,9 +2524,11 @@ footer_action_label = "Refresh"
 footer_action_key = f"slide_action_{slide['key']}"
 footer_action_disabled = False
 footer_action_help = None
+footer_action_target = "next"
 
 if slide["key"] == "overview":
     footer_action_label = "Start workflow"
+    footer_action_target = "next"
     _render_flow_steps(
         [
             ("Raw rows", "Load attendee-company rows from Manifest."),
@@ -2534,9 +2541,12 @@ if slide["key"] == "overview":
         ],
     )
 elif slide["key"] == "source":
-    footer_action_label = "Load Manifest list"
-    footer_action_disabled = workflow_stage != 1
-    footer_action_help = "The source list is already loaded." if footer_action_disabled else None
+    if workflow_stage == 1:
+        footer_action_label = "Load Manifest list"
+        footer_action_target = "load_manifest"
+    else:
+        footer_action_label = "Next"
+        footer_action_target = "next"
     _render_mini_metrics(
         [
             (
@@ -2559,9 +2569,16 @@ elif slide["key"] == "source":
         ],
     )
 elif slide["key"] == "normalize":
-    footer_action_label = "Normalize company names"
-    footer_action_disabled = workflow_stage != 2
-    footer_action_help = "Load the Manifest list first." if workflow_stage < 2 else "Company names are already normalized."
+    if workflow_stage == 2:
+        footer_action_label = "Normalize company names"
+        footer_action_target = "normalize_manifest"
+    elif workflow_stage > 2:
+        footer_action_label = "Next"
+        footer_action_target = "next"
+    else:
+        footer_action_label = "Normalize company names"
+        footer_action_disabled = True
+        footer_action_help = "Load the Manifest list first."
     _render_mini_metrics(
         [
             (
@@ -2598,12 +2615,16 @@ elif slide["key"] == "normalize":
     if workflow_stage == 1:
         st.warning("Load the Manifest list before normalizing company names.")
 elif slide["key"] == "exclusions":
-    footer_action_label = "Remove excluded rows"
-    footer_action_disabled = workflow_stage != 3
-    if workflow_stage < 3:
-        footer_action_help = "Load and normalize company names first."
+    if workflow_stage == 3:
+        footer_action_label = "Remove excluded rows"
+        footer_action_target = "prepare_manifest"
     elif workflow_stage > 3:
-        footer_action_help = "Excluded rows are already removed."
+        footer_action_label = "Next"
+        footer_action_target = "next"
+    else:
+        footer_action_label = "Remove excluded rows"
+        footer_action_disabled = True
+        footer_action_help = "Load and normalize company names first."
     _render_mini_metrics(
         [
             (
@@ -2650,12 +2671,16 @@ elif slide["key"] == "homepage":
     homepage_data_gaps = int(cascade_summary.get("data_gaps") or 0)
     homepage_pending = int((pending_verify_run or {}).get("projected_homepage_candidates") or 0)
     homepage_check_cap = min(homepage_pending or _setting_int(settings, "homepage_evidence_max_per_run", 100), _setting_int(settings, "homepage_evidence_max_per_run", 100))
-    footer_action_label = f"Check {homepage_check_cap:,} company pages" if homepage_check_cap > 0 else "Check company pages"
-    footer_action_disabled = workflow_stage < 4 or homepage_pending <= 0
     if workflow_stage < 4:
+        footer_action_label = "Check company pages"
+        footer_action_disabled = True
         footer_action_help = "Remove excluded rows before checking company pages."
     elif homepage_pending <= 0:
-        footer_action_help = "No unchecked company pages remain in the current queue."
+        footer_action_label = "Next"
+        footer_action_target = "next"
+    else:
+        footer_action_label = f"Check {homepage_check_cap:,} company pages"
+        footer_action_target = "check_company_pages"
     _render_mini_metrics(
         [
             (
@@ -2692,8 +2717,14 @@ elif slide["key"] == "estimate":
     if pending_verify_run:
         prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
         homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
-        footer_action_disabled = homepage_checked <= 0
-        footer_action_help = "Check company pages before approving the search and scoring run." if footer_action_disabled else None
+        if int(metrics.get("openai_scored") or 0) > 0:
+            footer_action_label = "Next"
+            footer_action_target = "next"
+        elif homepage_checked <= 0:
+            footer_action_disabled = True
+            footer_action_help = "Check company pages before approving the search and scoring run."
+        else:
+            footer_action_target = "start_paid_run"
         _render_mini_metrics(
             [
                 (
@@ -2725,7 +2756,8 @@ elif slide["key"] == "estimate":
         footer_action_help = "Load, normalize, and remove excluded rows before approving a run."
         st.warning("Load the Manifest list before estimating search and scoring.")
 elif slide["key"] == "cost":
-    footer_action_label = "Refresh cost data"
+    footer_action_label = "Next"
+    footer_action_target = "next"
     _render_mini_metrics(
         [
             (
@@ -2776,7 +2808,8 @@ elif slide["key"] == "cost":
         "No API run history recorded yet.",
     )
 elif slide["key"] == "prospects":
-    footer_action_label = "Refresh scored companies"
+    footer_action_label = "Next"
+    footer_action_target = "next"
     _render_prospect_cards(
         prospects.head(5),
         "No scored companies yet. Run search and scoring first.",
@@ -2795,7 +2828,8 @@ elif slide["key"] == "prospects":
         "No OpenAI-scored rows yet.",
     )
 elif slide["key"] == "routing":
-    footer_action_label = "Refresh routing counts"
+    footer_action_label = "Back to overview"
+    footer_action_target = "overview"
     _render_summary_card(
         "Company page and web search counts",
         [
@@ -2828,24 +2862,28 @@ footer_clicked = _render_slide_footer(
     action_help=footer_action_help,
 )
 if footer_clicked:
-    if slide["key"] == "overview":
-        st.session_state["slide_index"] = min(slide_count - 1, 1)
-    elif slide["key"] == "source":
+    if footer_action_target == "next":
+        st.session_state["slide_index"] = min(slide_count - 1, slide_index + 1)
+    elif footer_action_target == "overview":
+        st.session_state["slide_index"] = 0
+    elif footer_action_target == "load_manifest":
         st.session_state["load_manifest_requested"] = True
-    elif slide["key"] == "normalize":
+    elif footer_action_target == "normalize_manifest":
         st.session_state["normalize_manifest_requested"] = True
-    elif slide["key"] == "exclusions":
+    elif footer_action_target == "prepare_manifest":
         st.session_state["prepare_manifest_requested"] = True
-    elif slide["key"] == "homepage":
+    elif footer_action_target == "check_company_pages":
         st.session_state["active_verify_mode"] = pending_mode
         st.session_state["homepage_check_cap"] = min(
             int((pending_verify_run or {}).get("projected_homepage_candidates") or _setting_int(settings, "homepage_evidence_max_per_run", 100)),
             _setting_int(settings, "homepage_evidence_max_per_run", 100),
         )
         st.session_state["check_company_pages_requested"] = True
-    elif slide["key"] == "estimate":
+    elif footer_action_target == "start_paid_run":
         st.session_state["active_verify_mode"] = pending_mode
         st.session_state["start_paid_run_requested"] = True
+    elif slide["key"] == "overview":
+        st.session_state["slide_index"] = min(slide_count - 1, 1)
     st.rerun()
 
 st.stop()
