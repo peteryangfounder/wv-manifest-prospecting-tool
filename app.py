@@ -2641,12 +2641,6 @@ homepage_checked_frame = (
     else weighted_frame.copy()
 )
 selected_batch_table = _candidate_rows(weighted_frame, min(8, int(prospect_cap or 8)))
-scored_table = _first_rows(
-    weighted_frame[weighted_frame["score_provider"].eq("openai")].copy()
-    if not weighted_frame.empty
-    else weighted_frame.copy(),
-    100,
-)
 routing_table = _first_rows(homepage_checked_frame if not homepage_checked_frame.empty else candidate_table, 8)
 cost_stage_table = pd.DataFrame(metrics.get("cost_by_stage") or [])
 if not cost_stage_table.empty:
@@ -2979,20 +2973,8 @@ elif slide["key"] == "prospects":
     footer_action_label = "Next"
     footer_action_target = "next"
     _render_prospect_cards(
-        prospects.head(10),
+        prospects.head(100),
         "No scored companies yet. Run search and scoring first.",
-    )
-    _render_stage_table(
-        "All scored companies",
-        "Sorted by score. The table shows every company scored in this run, up to 100 rows.",
-        scored_table,
-        [
-            ("rank", "Rank", "number"),
-            ("canonical_name", "Company name", "company"),
-            ("weighted_score", "Total score", "number"),
-            ("evidence_source_display", "Scoring data", "text"),
-        ],
-        "No OpenAI-scored rows yet.",
     )
 elif slide["key"] == "routing":
     footer_action_label = "Back to overview"
