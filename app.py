@@ -2635,19 +2635,13 @@ if pending_verify_run:
     ]
 
 candidate_table = _candidate_rows(weighted_frame, 8)
-homepage_checked_frame = (
-    weighted_frame[weighted_frame["homepage_route_decision"].astype(str).ne("")].copy()
-    if not weighted_frame.empty
-    else weighted_frame.copy()
-)
 selected_batch_table = _candidate_rows(weighted_frame, min(8, int(prospect_cap or 8)))
-routing_table = _first_rows(homepage_checked_frame if not homepage_checked_frame.empty else candidate_table, 8)
 cost_stage_table = pd.DataFrame(metrics.get("cost_by_stage") or [])
 if not cost_stage_table.empty:
     cost_stage_table["run_type_display"] = cost_stage_table["run_type"].apply(_humanize)
 
 slides = [
-    {"key": "overview", "label": "Overview", "title": "Manifest list to scored companies.", "copy": "Steps 1-6 each show one operation and its result. Steps 7-9 review cost, scored companies, and page-check details."},
+    {"key": "overview", "label": "Overview", "title": "Manifest list to scored companies.", "copy": "Steps 1-6 each show one operation and its result. The final review slides cover cost and scored companies."},
     {"key": "source", "label": "Step 1", "title": "Load the Manifest list.", "copy": "Import raw attendee-company rows from the public Manifest attendee list."},
     {"key": "normalize", "label": "Step 2", "title": "Normalize company names.", "copy": "Convert raw attendee-company text into one saved company name per normalized company."},
     {"key": "exclusions", "label": "Step 3", "title": "Remove excluded rows.", "copy": "Remove incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names."},
@@ -2656,7 +2650,6 @@ slides = [
     {"key": "score", "label": "Step 6", "title": "Score companies.", "copy": "Score companies after company-page data and web-search data are ready."},
     {"key": "cost", "label": "Review", "title": "Review API cost detail.", "copy": "Inspect OpenAI API billing, Tavily Search API credits, and token-count estimates after the run."},
     {"key": "prospects", "label": "Review", "title": "Review scored companies.", "copy": "Inspect the companies scored from company-page data or web-search data."},
-    {"key": "routing", "label": "Review", "title": "Review page-check details.", "copy": "Inspect which companies had enough page data and which companies needed web search."},
 ]
 slide_count = len(slides)
 slide_index = int(st.session_state.get("slide_index", 0))
@@ -2970,36 +2963,11 @@ elif slide["key"] == "cost":
         model_name=str(runtime_settings.openai_model),
     )
 elif slide["key"] == "prospects":
-    footer_action_label = "Next"
-    footer_action_target = "next"
+    footer_action_label = "Back to overview"
+    footer_action_target = "overview"
     _render_prospect_cards(
         prospects.head(100),
         "No scored companies yet. Run search and scoring first.",
-    )
-elif slide["key"] == "routing":
-    footer_action_label = "Back to overview"
-    footer_action_target = "overview"
-    _render_summary_card(
-        "Company-page and web-search counts",
-        [
-            ("Companies kept after exclusions", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
-            ("Company pages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
-            ("Page data used for scoring", _format_int(cascade_summary.get("score_from_homepage") or 0)),
-            ("Companies sent to web search", _format_int(cascade_summary.get("needs_tavily") or 0)),
-            ("Companies without enough page data", _format_int(cascade_summary.get("data_gaps") or 0)),
-        ],
-    )
-    _render_stage_table(
-        "Company-page decision by row",
-        "First rows shown. Each row shows whether page text was enough for scoring or whether Tavily Search API was needed.",
-        routing_table,
-        [
-            ("canonical_name", "Company name", "company"),
-            ("homepage_page_data_status", "Page-data result", "text"),
-            ("homepage_route_display", "Next step", "text"),
-            ("homepage_route_reason_display", "Reason", "text"),
-        ],
-        "No company-page decisions saved yet.",
     )
 
 footer_clicked = _render_slide_footer(
