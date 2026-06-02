@@ -388,7 +388,7 @@ def collect_homepage_evidence(
     )
     return PipelineResult(
         "homepage_evidence",
-        f"Collected homepage metadata for {processed:,} companies. {score_ready:,} are score-ready from homepage evidence; {needs_tavily:,} need search evidence.",
+        f"Checked company pages for {processed:,} companies. {score_ready:,} can be scored from company-page data; {needs_tavily:,} need web search.",
         {
             "processed": processed,
             "accepted_domains": accepted,
@@ -470,7 +470,7 @@ def _homepage_enrichment_from_evidence(evidence: dict[str, Any]) -> dict[str, An
             "negative_signals": evidence.get("negative_signals") or [],
             "route_decision": evidence.get("route_decision"),
         },
-        "top_titles": [metadata.get("title") or metadata.get("og_title") or "Homepage evidence"],
+        "top_titles": [metadata.get("title") or metadata.get("og_title") or "Company page"],
         "top_urls": [evidence.get("resolved_url")] if evidence.get("resolved_url") else [],
         "top_snippets": [evidence.get("evidence_text") or ""],
         "website": evidence.get("resolved_url"),

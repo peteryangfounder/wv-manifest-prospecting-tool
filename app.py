@@ -89,7 +89,7 @@ DISPLAY_LABELS = {
     "stage_signal": "Stage signal",
     "startup": "Startup",
     "supply_chain": "Supply chain",
-    "tavily_enrichment": "Web search evidence",
+    "tavily_enrichment": "Web search",
     "technology": "Technology",
     "traction_signal": "Traction signal",
     "university_government_nonprofit": "University, government, or nonprofit",
@@ -1177,6 +1177,36 @@ def _clean_ui_text(value: object) -> str:
     return " ".join(clean.split())
 
 
+def _plain_source_copy(value: object) -> str:
+    clean = _clean_ui_text(value)
+    replacements = {
+        "homepage evidence": "company-page data",
+        "Homepage evidence": "Company-page data",
+        "search evidence": "web-search data",
+        "Search evidence": "Web-search data",
+        "external evidence": "source data",
+        "External evidence": "Source data",
+        "evidence": "source data",
+        "Evidence": "Source data",
+        "routing": "decision",
+        "Routing": "Decision",
+        "route": "next step",
+        "Route": "Next step",
+    }
+    for old, new in replacements.items():
+        clean = clean.replace(old, new)
+    return clean
+
+
+def _page_check_decision_label(value: object) -> str:
+    return {
+        "score_from_homepage": "Can score from page data",
+        "needs_tavily": "Needs web search",
+        "low_priority_data_gap": "Page data too thin",
+        "soft_exclude": "Removed after page check",
+    }.get(str(value or ""), "Not checked")
+
+
 def _normalized_display_name(value: str | None) -> str:
     return "".join(char.lower() if char.isalnum() else " " for char in str(value or "")).strip()
 
@@ -1258,6 +1288,7 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["evidence_source_display"] = frame["evidence_source"].apply(_humanize)
     frame["homepage_route_decision"] = frame.get("homepage_route_decision", pd.Series(dtype=object)).fillna("")
     frame["homepage_route_reason"] = frame.get("homepage_route_reason", pd.Series(dtype=object)).fillna("")
+    frame["homepage_route_reason_display"] = frame["homepage_route_reason"].apply(_plain_source_copy)
     frame["homepage_domain_status"] = frame.get("homepage_domain_status", pd.Series(dtype=object)).fillna("")
     frame["homepage_domain_confidence"] = pd.to_numeric(
         frame.get("homepage_domain_confidence", pd.Series(dtype=float)), errors="coerce"
@@ -1284,7 +1315,7 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
         if int(value or 0)
         else "Removed: excluded organization type"
     )
-    frame["homepage_route_display"] = frame["homepage_route_decision"].apply(lambda value: _humanize(value) if value else "Not checked")
+    frame["homepage_route_display"] = frame["homepage_route_decision"].apply(_page_check_decision_label)
     frame["homepage_domain_status_display"] = frame["homepage_domain_status"].apply(lambda value: _humanize(value) if value else "Not checked")
     frame["homepage_url_display"] = frame.apply(
         lambda row: row.get("homepage_resolved_url")
@@ -1320,8 +1351,8 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
         frame.loc[placeholder_mask, "source_status"] = "Removed: placeholder company name"
         frame.loc[placeholder_mask, "rationale"] = "Filtered out, generic placeholder entry rather than a named company."
     frame["rationale_preview"] = frame["rationale"].apply(lambda value: _clean_ui_text(_truncate(value, 140)))
-    frame["evidence_preview"] = frame["evidence_summary"].apply(lambda value: _clean_ui_text(_truncate(value, 180)))
-    frame["support_preview"] = frame["homepage_evidence_text"].apply(lambda value: _clean_ui_text(_truncate(value, 170)))
+    frame["evidence_preview"] = frame["evidence_summary"].apply(lambda value: _plain_source_copy(_truncate(value, 180)))
+    frame["support_preview"] = frame["homepage_evidence_text"].apply(lambda value: _plain_source_copy(_truncate(value, 170)))
     return frame.sort_values(["total_score", "canonical_name"], ascending=[False, True]).reset_index(drop=True)
 
 
@@ -1485,14 +1516,14 @@ def _route_examples_html(examples: list[dict], empty_message: str = "No cached e
         quality = float(example.get("evidence_quality") or 0.0)
         body.append(
             "<div class='route-card'>"
-            f"<div class='route-kicker'>{html.escape(_clean_ui_text(_humanize(example.get('route_decision') or 'unrouted')))}</div>"
+            f"<div class='route-kicker'>{html.escape(_page_check_decision_label(example.get('route_decision')))}</div>"
             f"<div class='route-company'>{html.escape(_clean_ui_text(example.get('canonical_name')))}</div>"
             f"<div class='route-meta'>Domain: {html.escape(_clean_ui_text(domain))}</div>"
-            f"<div class='route-meta'>Match strength: {_format_percent(confidence)} domain, {_format_percent(quality)} homepage metadata</div>"
+            f"<div class='route-meta'>Match strength: {_format_percent(confidence)} domain, {_format_percent(quality)} page data</div>"
             f"<div class='route-meta'>Positive: {_signal_pills(positives, 'None')}</div>"
             f"<div class='route-meta'>Negative: {_signal_pills(negatives, 'None')}</div>"
-            f"<div class='route-snippet'>{html.escape(_clean_ui_text(_truncate(example.get('evidence_text') or example.get('fetch_error') or 'No homepage metadata available.', 220)))}</div>"
-            f"<div class='route-meta'>Page/search note: {html.escape(_clean_ui_text(example.get('route_reason') or 'No page/search note recorded.'))}</div>"
+            f"<div class='route-snippet'>{html.escape(_plain_source_copy(_truncate(example.get('evidence_text') or example.get('fetch_error') or 'No homepage metadata available.', 220)))}</div>"
+            f"<div class='route-meta'>Decision note: {html.escape(_plain_source_copy(example.get('route_reason') or 'No decision note recorded.'))}</div>"
             "</div>"
         )
     body.append("</div>")
@@ -1721,8 +1752,8 @@ def _render_processing_controls(candidate_count: int, current_cap: int) -> int:
     index = options.index(current_cap)
     st.markdown(
         "<div class='control-group'>"
-        "<div class='control-title'>Rows to analyze after exclusions</div>"
-        "<div class='control-copy'>This sets the maximum number of companies for company-page checks, Tavily Search API, and OpenAI API scoring.</div>"
+        "<div class='control-title'>Batch size</div>"
+        "<div class='control-copy'>Choose how many companies this run should cover.</div>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -2142,7 +2173,7 @@ def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
         source_url = row.get("homepage_resolved_url") or row.get("website") or row.get("primary_source_url") or ""
         snippets = row.get("top_snippets") or []
         support_snippet = row.get("support_preview") or (snippets[0] if snippets else "")
-        support_snippet = _clean_ui_text(_truncate(support_snippet or row.get("evidence_summary") or "No source text available.", 160))
+        support_snippet = _plain_source_copy(_truncate(support_snippet or row.get("evidence_summary") or "No source text available.", 160))
         evidence_confidence = (
             _format_percent(float(row.get("homepage_evidence_quality") or 0.0))
             if float(row.get("homepage_evidence_quality") or 0.0) > 0
@@ -2171,8 +2202,8 @@ def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
             f"{html.escape(support_snippet)}"
             f"<div class='route-meta'>Positive: {_signal_pills(row.get('homepage_positive_signals'), 'Not captured')}</div>"
             f"<div class='route-meta'>Negative: {_signal_pills(row.get('homepage_negative_signals'), 'Not captured')}</div>"
-            f"<div class='route-meta'>Source data confidence: {html.escape(_clean_ui_text(evidence_confidence))}</div>"
-            f"<div class='route-meta'>Page/search note: {html.escape(_clean_ui_text(row.get('homepage_route_reason') or row.get('evidence_summary') or 'No page/search note recorded.'))}</div>"
+            f"<div class='route-meta'>Confidence: {html.escape(_clean_ui_text(evidence_confidence))}</div>"
+            f"<div class='route-meta'>Decision note: {html.escape(_plain_source_copy(row.get('homepage_route_reason') or row.get('evidence_summary') or 'No decision note recorded.'))}</div>"
             "</div>"
             "</div>"
         )
@@ -2372,7 +2403,7 @@ if st.session_state.pop("check_company_pages_requested", False):
     progress.progress(1.0, text="Company page check finished.")
     st.session_state["last_action"] = {
         "message": homepage_result.message,
-        "level": "warning" if homepage_result.counts.get("errors") else "success",
+        "level": "success",
     }
     st.session_state.pop("active_verify_mode", None)
     st.session_state.pop("homepage_check_cap", None)
@@ -2385,7 +2416,7 @@ if st.session_state.pop("start_paid_run_requested", False):
     progress = st.progress(0, text=f"Refreshing company type labels before running up to {cap:,} companies...")
     preview = st.empty()
     classify_result = run_deterministic_classification(conn)
-    progress.progress(0.05, text="Starting web search for companies that still need search evidence...")
+    progress.progress(0.05, text="Starting web search for companies that still need it...")
 
     def enrichment_progress(index, total, result, counts):
         if total:
@@ -2447,7 +2478,7 @@ if st.session_state.pop("start_paid_run_requested", False):
     st.rerun()
 
 last_action = st.session_state.get("last_action")
-if last_action:
+if last_action and last_action.get("level") not in {"success", "info"}:
     level = html.escape(last_action.get("level", "info"))
     message = html.escape(_clean_ui_text(last_action.get("message", "")))
     st.markdown(f"<div class='status-strip {level}'>{message}</div>", unsafe_allow_html=True)
@@ -2564,15 +2595,15 @@ if not cost_stage_table.empty:
     cost_stage_table["run_type_display"] = cost_stage_table["run_type"].apply(_humanize)
 
 slides = [
-    {"key": "overview", "label": "Overview", "title": "Manifest list to scored companies.", "copy": "Steps 1-5 each show the operation setup and the current result from running it. Steps 6-8 are review pages for cost, scored companies, and routing details."},
+    {"key": "overview", "label": "Overview", "title": "Manifest list to scored companies.", "copy": "Steps 1-5 each show the operation setup and the current result from running it. Steps 6-8 review cost, scored companies, and page-check details."},
     {"key": "source", "label": "Step 1", "title": "Load the Manifest list.", "copy": "Import raw attendee-company rows from the public Manifest attendee list."},
     {"key": "normalize", "label": "Step 2", "title": "Normalize company names.", "copy": "Convert raw attendee-company text into one saved company name per normalized company."},
     {"key": "exclusions", "label": "Step 3", "title": "Remove excluded rows.", "copy": "Remove incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names."},
     {"key": "homepage", "label": "Step 4", "title": "Check company pages.", "copy": "Read domains, page titles, descriptions, headings, and short homepage text before web search."},
     {"key": "estimate", "label": "Step 5", "title": "Run web search and scoring.", "copy": "Review the selected batch, expected web-search and scoring calls, and current scored-result counts before or after running the operation."},
     {"key": "cost", "label": "Review", "title": "Review API cost detail.", "copy": "Inspect OpenAI API billing, Tavily Search API credits, and token-count estimates after the run."},
-    {"key": "prospects", "label": "Review", "title": "Review scored companies.", "copy": "Inspect the companies scored from company-page or web-search evidence."},
-    {"key": "routing", "label": "Review", "title": "Review company-page and web-search routing.", "copy": "Inspect which companies were scored from page data and which companies needed web search."},
+    {"key": "prospects", "label": "Review", "title": "Review scored companies.", "copy": "Inspect the companies scored from company-page data or web-search data."},
+    {"key": "routing", "label": "Review", "title": "Review page-check details.", "copy": "Inspect which companies had enough page data and which companies needed web search."},
 ]
 slide_count = len(slides)
 slide_index = int(st.session_state.get("slide_index", 0))
@@ -2617,8 +2648,8 @@ if slide["key"] == "overview":
             ("Company pages", "Choose the batch size, then read domains, titles, descriptions, and snippets."),
             ("Search and score", "Run Tavily only when company-page data is incomplete, then score companies against Wittington criteria."),
             ("Cost detail", "Review API calls, token estimates, and provider billing details."),
-            ("Scored companies", "Review the ranked companies and the evidence source used for scoring."),
-            ("Routing detail", "Review which companies used page data and which needed web search."),
+            ("Scored companies", "Review the ranked companies and the source data used for scoring."),
+            ("Page-check details", "Review which companies used page data and which needed web search."),
         ],
     )
 elif slide["key"] == "source":
@@ -2704,17 +2735,17 @@ elif slide["key"] == "homepage":
         selected_batch_remaining = max(0, int(prospect_cap) - selected_batch_checked)
         next_unchecked_available = int((pending_verify_run or {}).get("projected_homepage_candidates") or 0)
         page_check_run_count = min(selected_batch_remaining, next_unchecked_available)
-        _render_phase_panel(
-            "before",
-            "Choose the batch for page checks",
-            "The page check reads homepage metadata first, so companies with enough page data can avoid a Tavily web-search call.",
-            [
-                ("Selected batch", f"{_format_int(prospect_cap)} companies"),
-                ("Already checked in selected batch", _format_int(selected_batch_checked)),
-                ("Remaining page checks in selected batch", _format_int(selected_batch_remaining)),
-                ("What happens", "Read homepage title, description, headings, and short text"),
-            ],
-        )
+        if page_check_run_count > 0:
+            _render_phase_panel(
+                "before",
+                "Page check setup",
+                "Check company pages before web search. If a page has enough useful text, that company can skip Tavily.",
+                [
+                    ("Selected batch", f"{_format_int(prospect_cap)} companies"),
+                    ("Company pages to check now", _format_int(page_check_run_count)),
+                    ("Operation", "Read page title, description, headings, and short homepage text"),
+                ],
+            )
     else:
         selected_batch_checked = 0
         selected_batch_remaining = 0
@@ -2737,21 +2768,16 @@ elif slide["key"] == "homepage":
             st.session_state["homepage_check_cap"] = int(page_check_run_count)
             st.session_state["check_company_pages_requested"] = True
             st.rerun()
-    elif workflow_stage >= 4 and selected_batch_remaining <= 0:
-        st.info("The selected batch has already been checked. Choose a larger batch to check more company pages, or continue to Step 5.")
-    elif workflow_stage >= 4:
-        st.info("No unchecked company pages remain for the selected queue. Continue to Step 5.")
 
     if homepage_checked > 0:
         _render_phase_panel(
             "after",
-            "Page-check routing is available",
-            "The checked companies are now split between page-data scoring and web-search routing.",
+            "Page check result",
+            f"{_format_int(homepage_scoreable)} companies can be scored from company-page data. {_format_int(homepage_needs_search)} need web search.",
             [
-                ("Page checks completed in selected batch", _format_int(selected_batch_checked)),
-                ("All company pages checked so far", _format_int(homepage_checked)),
-                ("Ready from page data across checked pages", _format_int(homepage_scoreable)),
-                ("Need web search across checked pages", _format_int(homepage_needs_search)),
+                ("Company pages checked", _format_int(homepage_checked)),
+                ("Can skip web search", _format_int(homepage_scoreable)),
+                ("Need web search", _format_int(homepage_needs_search)),
             ],
         )
 elif slide["key"] == "estimate":
@@ -2863,14 +2889,14 @@ elif slide["key"] == "prospects":
     )
     _render_stage_table(
         "Rows after OpenAI API scoring",
-        "First rows shown. Scored rows include the total score and the source type used for scoring.",
+        "First rows shown. Scored rows include the total score and the data source used for scoring.",
         scored_table,
         [
             ("rank", "Rank", "number"),
             ("canonical_name", "Company name", "company"),
             ("weighted_score", "Total score", "score"),
             ("company_type_display", "OpenAI company type", "text"),
-            ("evidence_source_display", "Source used for scoring", "text"),
+            ("evidence_source_display", "Scoring data", "text"),
         ],
         "No OpenAI-scored rows yet.",
     )
@@ -2878,7 +2904,7 @@ elif slide["key"] == "routing":
     footer_action_label = "Back to overview"
     footer_action_target = "overview"
     _render_summary_card(
-        "Company page and web search counts",
+        "Company-page and web-search counts",
         [
             ("Companies kept after exclusions", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
             ("Company pages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
@@ -2888,16 +2914,16 @@ elif slide["key"] == "routing":
         ],
     )
     _render_stage_table(
-        "Company-page routing by row",
+        "Company-page decision by row",
         "First rows shown. Each row shows whether page text was enough for scoring or whether Tavily Search API was needed.",
         routing_table,
         [
             ("canonical_name", "Company name", "company"),
             ("homepage_page_data_status", "Page-data result", "text"),
-            ("homepage_route_display", "Processing route", "text"),
-            ("homepage_route_reason", "Recorded reason", "text"),
+            ("homepage_route_display", "Next step", "text"),
+            ("homepage_route_reason_display", "Reason", "text"),
         ],
-        "No company-page routing rows saved yet.",
+        "No company-page decisions saved yet.",
     )
 
 footer_clicked = _render_slide_footer(
