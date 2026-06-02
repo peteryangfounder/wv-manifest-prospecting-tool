@@ -80,6 +80,7 @@ class ProviderBilledSpend:
 
 
 _OPENAI_BILLING_CACHE: dict[tuple[str | None, str, str], tuple[float, OpenAIBillingSnapshot]] = {}
+_TAVILY_USAGE_CACHE: dict[str, tuple[float, TavilyBillingSummary]] = {}
 
 
 def calculate_tavily_billing(
@@ -133,6 +134,8 @@ def fetch_tavily_usage_snapshot(
 ) -> TavilyBillingSummary:
     current_time = float(now if now is not None else time.time())
     fetched_at_label = _format_epoch_datetime(int(current_time))
+    cache_key = api_key or ""
+    ttl = max(0, int(cache_ttl_seconds or 0))
     fallback = calculate_tavily_billing(
         credits_used=fallback_credits_used,
         included_monthly_credits=included_monthly_credits,
@@ -145,6 +148,18 @@ def fetch_tavily_usage_snapshot(
         return TavilyBillingSummary(
             **{**fallback.__dict__, "source_label": "Live Tavily usage unavailable", "fetched_at_label": fetched_at_label, "error": "TAVILY_API_KEY is not configured.", "is_live": False}
         )
+
+    if ttl > 0 and session is None:
+        cached = _TAVILY_USAGE_CACHE.get(cache_key)
+        if cached and current_time - cached[0] < ttl:
+            snapshot = cached[1]
+            return TavilyBillingSummary(
+                **{
+                    **snapshot.__dict__,
+                    "source_label": "Live from Tavily usage API",
+                    "is_live": True,
+                }
+            )
 
     client = session or requests.Session()
     errors: list[str] = []
@@ -161,7 +176,7 @@ def fetch_tavily_usage_snapshot(
                 fallback=fallback,
                 fallback_payg_price_per_credit_usd=payg_price_per_credit_usd,
             )
-            return TavilyBillingSummary(
+            snapshot = TavilyBillingSummary(
                 **{
                     **parsed.__dict__,
                     "source_label": "Live from Tavily usage API",
@@ -169,8 +184,23 @@ def fetch_tavily_usage_snapshot(
                     "is_live": True,
                 }
             )
+            if ttl > 0 and session is None:
+                _TAVILY_USAGE_CACHE[cache_key] = (current_time, snapshot)
+            return snapshot
         except Exception as exc:  # noqa: BLE001 - retain local fallback if Tavily usage API is unavailable.
             errors.append(_sanitize_error(str(exc)))
+
+    cached = _TAVILY_USAGE_CACHE.get(cache_key) if session is None else None
+    if cached:
+        snapshot = cached[1]
+        return TavilyBillingSummary(
+            **{
+                **snapshot.__dict__,
+                "source_label": "Last live Tavily usage API snapshot; refresh failed",
+                "error": "; ".join(error for error in errors if error)[:240] or "Unknown Tavily usage API error.",
+                "is_live": True,
+            }
+        )
 
     return TavilyBillingSummary(
         **{

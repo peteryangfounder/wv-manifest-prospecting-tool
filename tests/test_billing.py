@@ -136,6 +136,37 @@ def test_tavily_usage_fetch_uses_live_usage_api() -> None:
     assert session.calls[0]["url"] == billing.TAVILY_USAGE_URL
 
 
+def test_tavily_usage_fetch_keeps_last_live_snapshot_when_refresh_fails(monkeypatch) -> None:
+    billing._TAVILY_USAGE_CACHE.clear()
+    live = calculate_tavily_billing(credits_used=1096, included_monthly_credits=1000, pay_as_you_go_enabled=True)
+    billing._TAVILY_USAGE_CACHE["tvly-test"] = (
+        1_717_200_000,
+        billing.TavilyBillingSummary(
+            **{
+                **live.__dict__,
+                "source_label": "Live from Tavily usage API",
+                "fetched_at_label": "2024-06-01T00:00:00Z",
+                "is_live": True,
+            }
+        ),
+    )
+    session = MockSession([MockResponse({}, 500), MockResponse({}, 500)])
+    monkeypatch.setattr(billing.requests, "Session", lambda: session)
+
+    summary = fetch_tavily_usage_snapshot(
+        api_key="tvly-test",
+        fallback_credits_used=878,
+        included_monthly_credits=1000,
+        cache_ttl_seconds=300,
+        now=1_717_201_000,
+    )
+
+    assert summary.credits_used == 1096
+    assert summary.is_live is True
+    assert "Last live" in summary.source_label
+    assert summary.fetched_at_label == "2024-06-01T00:00:00Z"
+
+
 def test_openai_usage_parser_extracts_token_model_project_key_and_requests() -> None:
     summary = parse_openai_completions_usage_response(
         {
