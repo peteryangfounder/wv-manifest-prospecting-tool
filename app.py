@@ -139,7 +139,7 @@ VERIFY_MODE_PRESETS = {
     },
     "recall-first": {
         "label": "Recall-first",
-        "description": "Score every company type kept after rule filtering, up to the approved batch size.",
+        "description": "Score every company type kept after duplicate merge, placeholder removal, and excluded organization-type removal, up to the approved batch size.",
     },
 }
 
@@ -1189,7 +1189,11 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["deterministic_type_display"] = frame["deterministic_type"].apply(_humanize)
     frame["confidence_display"] = frame["confidence"].apply(_humanize)
     frame["score_source_display"] = frame["score_provider"].apply(_humanize)
-    frame["source_status"] = frame["is_candidate"].apply(lambda value: "Kept by rules" if int(value or 0) else "Removed by rules")
+    frame["source_status"] = frame["is_candidate"].apply(
+        lambda value: "Kept for company-page check or web search"
+        if int(value or 0)
+        else "Removed: excluded organization type"
+    )
     frame["homepage_route_display"] = frame["homepage_route_decision"].apply(lambda value: _humanize(value) if value else "Not checked")
     frame["homepage_domain_status_display"] = frame["homepage_domain_status"].apply(lambda value: _humanize(value) if value else "Not checked")
     frame["homepage_url_display"] = frame.apply(
@@ -1223,7 +1227,7 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
         frame.loc[placeholder_mask, "company_type_display"] = _humanize("duplicate_or_noisy_entry")
         frame.loc[placeholder_mask, "deterministic_type_display"] = _humanize("duplicate_or_noisy_entry")
         frame.loc[placeholder_mask, "is_refined_prospect"] = False
-        frame.loc[placeholder_mask, "source_status"] = "Removed by rules"
+        frame.loc[placeholder_mask, "source_status"] = "Removed: placeholder company name"
         frame.loc[placeholder_mask, "rationale"] = "Filtered out, generic placeholder entry rather than a named company."
     frame["rationale_preview"] = frame["rationale"].apply(lambda value: _clean_ui_text(_truncate(value, 140)))
     frame["evidence_preview"] = frame["evidence_summary"].apply(lambda value: _clean_ui_text(_truncate(value, 180)))
@@ -1559,7 +1563,7 @@ def _row_count_options(max_count: int) -> list[int]:
 
 def _row_count_label(value: int, max_count: int) -> str:
     if int(value) == int(max_count):
-        return f"All rows kept after rules ({_format_int(max_count)})"
+        return f"All rows kept after exclusions ({_format_int(max_count)})"
     return f"{_format_int(value)} rows"
 
 
@@ -1568,7 +1572,7 @@ def _render_processing_controls(candidate_count: int, current_cap: int) -> int:
         st.markdown(
             "<div class='control-group'>"
             "<div class='control-title'>Rows to process</div>"
-            "<div class='control-copy'>Load the Manifest list first. The row-count choices use the rows that remain after duplicate merge and rule filtering.</div>"
+            "<div class='control-copy'>Load the Manifest list first. The row-count choices use the rows that remain after duplicate company names, placeholder names, and excluded organization types are removed.</div>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -1581,13 +1585,13 @@ def _render_processing_controls(candidate_count: int, current_cap: int) -> int:
     index = options.index(current_cap)
     st.markdown(
         "<div class='control-group'>"
-        "<div class='control-title'>Rows to process after rule filtering</div>"
+        "<div class='control-title'>Rows to process after exclusions</div>"
         "<div class='control-copy'>This sets the maximum number of companies that can move through company-page checks, Tavily Search API, and OpenAI API scoring.</div>"
         "</div>",
         unsafe_allow_html=True,
     )
     selected_cap = st.radio(
-        "Rows to process after rule filtering",
+        "Rows to process after exclusions",
         options,
         index=index,
         format_func=lambda value: _row_count_label(int(value), candidate_count),
@@ -2146,7 +2150,7 @@ if st.session_state.pop("load_source_requested", False):
 if st.session_state.pop("start_paid_run_requested", False):
     cap = int(prospect_cap)
     active_verify_mode = st.session_state.get("active_verify_mode", verify_mode)
-    progress = st.progress(0, text=f"Refreshing rule classifications before scoring up to {cap:,} companies...")
+    progress = st.progress(0, text=f"Refreshing company type labels before scoring up to {cap:,} companies...")
     preview = st.empty()
     classify_result = run_deterministic_classification(conn)
     progress.progress(0.05, text="Reading bounded homepage metadata before paid search...")
@@ -2243,7 +2247,7 @@ candidate_count = int(weighted_frame["is_candidate"].sum()) if not weighted_fram
 raw_company_count = int(metrics.get("raw_companies") or 0)
 unique_company_count = int(metrics.get("unique_companies") or 0)
 duplicate_rows_merged = max(0, raw_company_count - unique_company_count)
-rule_removed_count = max(0, unique_company_count - candidate_count)
+excluded_or_placeholder_count = max(0, unique_company_count - candidate_count)
 prospect_cap_limit = max(1, candidate_count or unique_company_count or int(settings.max_score or 1))
 prospect_cap = max(1, min(int(prospect_cap or prospect_cap_limit), prospect_cap_limit))
 run_totals = metrics.get("run_totals") or {}
@@ -2306,7 +2310,7 @@ if pending_verify_run:
             ]
         )
     cascade_rows = [
-        ("Companies kept after rule filtering", _format_int(pending_verify_run.get("api_eligible_companies") or broad_universe_pending)),
+        ("Companies kept after duplicate merge and exclusions", _format_int(pending_verify_run.get("api_eligible_companies") or broad_universe_pending)),
         ("Homepages checked", _format_int(pending_verify_run.get("homepage_attempted") or 0)),
         ("Page data used for scoring", _format_int(pending_verify_run.get("cached_homepage_ready") or 0)),
         ("Companies scored from page data", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
@@ -2314,14 +2318,12 @@ if pending_verify_run:
         ("Companies without enough page data", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
     ]
 
-source_table = _first_rows(weighted_frame, 8)
 candidate_table = _candidate_rows(weighted_frame, 8)
 homepage_checked_frame = (
     weighted_frame[weighted_frame["homepage_route_decision"].astype(str).ne("")].copy()
     if not weighted_frame.empty
     else weighted_frame.copy()
 )
-homepage_table = _first_rows(homepage_checked_frame if not homepage_checked_frame.empty else candidate_table, 8)
 selected_batch_table = _candidate_rows(weighted_frame, min(8, int(prospect_cap or 8)))
 scored_table = _first_rows(
     weighted_frame[weighted_frame["score_provider"].eq("openai")].copy()
@@ -2372,18 +2374,6 @@ if slide["key"] == "overview":
             ("Results", "Show scored companies, OpenAI API cost, and Tavily Search API cost."),
         ],
     )
-    _render_stage_table(
-        "Current row table",
-        "First rows shown. Move through the slides to see the same company rows become cleaned, filtered, checked, searched, and scored.",
-        source_table,
-        [
-            ("raw_name", "Manifest row text", "company"),
-            ("canonical_name", "Cleaned company name", "company"),
-            ("source_status", "Rule result", "text"),
-            ("score_status_display", "Scoring status", "text"),
-        ],
-        "No company rows loaded yet.",
-    )
 elif slide["key"] == "source":
     _render_mini_metrics(
         [
@@ -2398,14 +2388,14 @@ elif slide["key"] == "source":
                 f"{_format_int(duplicate_rows_merged)} duplicate row{'s' if duplicate_rows_merged != 1 else ''} merged after company names were normalized.",
             ),
             (
-                "Rows kept after rule filtering",
+                "Rows kept after duplicate merge and exclusions",
                 _format_int(candidate_count),
-                f"{_format_int(rule_removed_count)} row{'s' if rule_removed_count != 1 else ''} removed: incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names.",
+                f"{_format_int(excluded_or_placeholder_count)} row{'s' if excluded_or_placeholder_count != 1 else ''} removed: incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names.",
             ),
             (
                 "OpenAI API + Tavily Search API cost so far",
                 "$0.0000",
-                "Loading the list, merging duplicates, and applying rules do not call OpenAI or Tavily.",
+                "Loading the list, merging duplicate company names, and removing excluded organization types do not call OpenAI or Tavily.",
             ),
         ]
     )
@@ -2421,7 +2411,7 @@ elif slide["key"] == "source":
         st.session_state["clear_processing_cache_requested"] = True
         st.rerun()
     _render_summary_card(
-        "Rule processing",
+        "Manifest list preparation",
         [
             ("Input", "Public Manifest attendee list"),
             ("Cleaned list", "Names normalized and duplicates merged"),
@@ -2429,22 +2419,9 @@ elif slide["key"] == "source":
             ("Remaining rows", f"{_format_int(candidate_count)} companies will be checked with company pages or web search"),
         ],
     )
-    if workflow_stage == 1 and st.button("Load Manifest list and apply rules", type="primary", use_container_width=True):
+    if workflow_stage == 1 and st.button("Load Manifest list and remove excluded rows", type="primary", use_container_width=True):
         st.session_state["load_source_requested"] = True
         st.rerun()
-    _render_stage_table(
-        "Rows after duplicate merge and rule filtering",
-        "First rows shown. The table keeps the original Manifest text next to the cleaned company name and rule result.",
-        source_table,
-        [
-            ("raw_name", "Manifest row text", "company"),
-            ("canonical_name", "Cleaned company name", "company"),
-            ("duplicate_count", "Rows merged", "number"),
-            ("deterministic_type_display", "Rule category", "text"),
-            ("source_status", "Rule result", "text"),
-        ],
-        "No company rows loaded yet.",
-    )
 elif slide["key"] == "homepage":
     homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
     homepage_scoreable = int(cascade_summary.get("score_from_homepage") or 0)
@@ -2482,18 +2459,6 @@ elif slide["key"] == "homepage":
             ("Next", "Companies without enough page text are sent to web search"),
         ],
     )
-    _render_stage_table(
-        "Rows after company-page checks",
-        "First rows shown. A row stays on page data only when the homepage has enough text for scoring; otherwise the row moves to Tavily Search API.",
-        homepage_table,
-        [
-            ("canonical_name", "Company name", "company"),
-            ("homepage_url_display", "Company page or domain", "text"),
-            ("homepage_domain_status_display", "Domain result", "text"),
-            ("homepage_page_data_status", "Next processing step", "text"),
-        ],
-        "No company-page data saved yet.",
-    )
 elif slide["key"] == "estimate":
     if pending_verify_run:
         _render_mini_metrics(
@@ -2528,8 +2493,8 @@ elif slide["key"] == "estimate":
             selected_batch_table,
             [
                 ("canonical_name", "Company name", "company"),
-                ("deterministic_type_display", "Rule category", "text"),
-                ("source_status", "Rule result", "text"),
+                ("deterministic_type_display", "Company type label", "text"),
+                ("source_status", "Processing status", "text"),
                 ("score_status_display", "Scoring status", "text"),
             ],
             "No rows are available for the selected batch.",
@@ -2612,7 +2577,7 @@ elif slide["key"] == "routing":
     _render_summary_card(
         "Company page and web search counts",
         [
-            ("Companies kept after rule filtering", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
+            ("Companies kept after duplicate merge and exclusions", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
             ("Company pages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
             ("Page data used for scoring", _format_int(cascade_summary.get("score_from_homepage") or 0)),
             ("Companies sent to web search", _format_int(cascade_summary.get("needs_tavily") or 0)),
