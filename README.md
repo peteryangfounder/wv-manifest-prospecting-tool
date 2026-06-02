@@ -4,7 +4,13 @@ Manifest Prospecting Tool is an internal VC sourcing workflow for Wittington Ven
 
 The product uses code for retrieval, storage, filtering, concurrency, retry handling, and cost control. It uses Tavily for external search evidence, then uses OpenAI for scoring after that evidence has been retrieved and cached.
 
-Hosted app: https://wv-manifest-prospecting-tool-b8jadagmhgsh8wirbknjb9.streamlit.app/
+Run locally:
+
+```bash
+streamlit run app.py
+```
+
+Hosted app: not currently published. The previous Streamlit Cloud URL no longer resolves, so create or reconnect the Streamlit Cloud app before sharing a hosted link.
 
 ## Current App
 
