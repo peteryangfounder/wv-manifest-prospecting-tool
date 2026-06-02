@@ -284,7 +284,7 @@ def enrich_candidates(
     tavily_billing = calculate_tavily_billing(
         credits_used=calls,
         included_monthly_credits=_setting(settings, "tavily_included_monthly_credits", 1000),
-        pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", False),
+        pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", True),
         payg_price_per_credit_usd=_setting(settings, "tavily_payg_price_per_credit_usd", 0.008),
         plan_name=_setting(settings, "tavily_plan_name", "Researcher"),
         shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.001),

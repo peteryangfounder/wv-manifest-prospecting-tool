@@ -1847,7 +1847,7 @@ def _tavily_billing_from_metrics(metrics: dict, settings) -> TavilyBillingSummar
         api_key=_setting(settings, "tavily_api_key", None),
         fallback_credits_used=int(totals.get("tavily_calls") or 0),
         included_monthly_credits=_setting(settings, "tavily_included_monthly_credits", 1000),
-        pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", False),
+        pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", True),
         payg_price_per_credit_usd=_setting(settings, "tavily_payg_price_per_credit_usd", 0.008),
         plan_name=_setting(settings, "tavily_plan_name", "Researcher"),
         shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.008),
@@ -1898,7 +1898,7 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> 
     tavily_before = calculate_tavily_billing(
         credits_used=existing_tavily_credits,
         included_monthly_credits=included_tavily_credits,
-        pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", False),
+        pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", True),
         payg_price_per_credit_usd=tavily_payg_price,
         plan_name=_setting(settings, "tavily_plan_name", "Researcher"),
         shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.008),
@@ -1906,7 +1906,7 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> 
     tavily_after = calculate_tavily_billing(
         credits_used=existing_tavily_credits + projected_tavily_calls,
         included_monthly_credits=included_tavily_credits,
-        pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", False),
+        pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", True),
         payg_price_per_credit_usd=tavily_payg_price,
         plan_name=_setting(settings, "tavily_plan_name", "Researcher"),
         shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.008),

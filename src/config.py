@@ -91,7 +91,7 @@ class Settings:
     homepage_max_domain_attempts: int = 3
     tavily_plan_name: str = "Researcher"
     tavily_included_monthly_credits: int = 1000
-    tavily_pay_as_you_go_enabled: bool = False
+    tavily_pay_as_you_go_enabled: bool = True
     tavily_payg_price_per_credit_usd: float = 0.008
     openai_admin_key: str | None = None
     openai_billing_project_id: str | None = "proj_ynS2F3GVOCBbgmXvTl9Vl1Ie"
@@ -130,7 +130,7 @@ def get_settings() -> Settings:
         tavily_cost_per_call_usd=_env_float("TAVILY_COST_PER_CALL_USD", 0.008),
         tavily_plan_name=os.getenv("TAVILY_PLAN_NAME", "Researcher"),
         tavily_included_monthly_credits=_env_int("TAVILY_INCLUDED_MONTHLY_CREDITS", 1000),
-        tavily_pay_as_you_go_enabled=_env_bool("TAVILY_PAY_AS_YOU_GO_ENABLED", False),
+        tavily_pay_as_you_go_enabled=_env_bool("TAVILY_PAY_AS_YOU_GO_ENABLED", True),
         tavily_payg_price_per_credit_usd=_env_float("TAVILY_PAYG_PRICE_PER_CREDIT_USD", 0.008),
         openai_admin_key=os.getenv("OPENAI_ADMIN_KEY") or None,
         openai_billing_project_id=os.getenv("OPENAI_BILLING_PROJECT_ID") or "proj_ynS2F3GVOCBbgmXvTl9Vl1Ie",

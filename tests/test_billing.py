@@ -105,6 +105,17 @@ def test_tavily_usage_parser_prefers_live_credit_fields() -> None:
     assert summary.pay_as_you_go_enabled is True
 
 
+def test_tavily_usage_parser_infers_paygo_on_from_paygo_usage() -> None:
+    fallback = calculate_tavily_billing(credits_used=0, included_monthly_credits=1000, pay_as_you_go_enabled=False)
+
+    summary = parse_tavily_usage_response(
+        {"credits_used": 1000, "included_credits": 1000, "paygo_credits": 72},
+        fallback=fallback,
+    )
+
+    assert summary.pay_as_you_go_enabled is True
+
+
 def test_tavily_usage_fetch_falls_back_to_local_counts_without_key() -> None:
     summary = fetch_tavily_usage_snapshot(api_key=None, fallback_credits_used=12, included_monthly_credits=1000)
 

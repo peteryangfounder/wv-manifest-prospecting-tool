@@ -193,6 +193,7 @@ def parse_tavily_usage_response(
     included = _first_numeric(payload, ("included_credits", "included_monthly_credits", "monthly_credit_limit", "credit_limit", "credits_limit", "plan_limit", "limit"))
     remaining = _first_numeric(payload, ("credits_remaining", "remaining_credits", "free_credits_remaining"))
     payg_spend = _first_numeric(payload, ("paygo_spend", "payg_spend", "pay_as_you_go_spend", "paygo_cost", "payg_cost", "overage_cost"))
+    payg_credits = _first_numeric(payload, ("paygo_credits", "payg_credits", "pay_as_you_go_credits", "paygo_usage", "payg_usage", "overage_credits"))
     payg_enabled = _first_bool(payload, ("pay_as_you_go_enabled", "paygo_enabled", "payg_enabled"))
     plan_name = _first_text(payload, ("plan_name", "plan", "tier", "current_plan"))
 
@@ -201,6 +202,8 @@ def parse_tavily_usage_response(
         credits_used = max(0, resolved_included - int(remaining))
     resolved_used = int(credits_used) if credits_used is not None else fallback.credits_used
     resolved_payg_enabled = fallback.pay_as_you_go_enabled if payg_enabled is None else payg_enabled
+    if payg_enabled is None and (payg_spend is not None or payg_credits is not None):
+        resolved_payg_enabled = True
     resolved_plan = plan_name or fallback.plan_name
 
     calculated = calculate_tavily_billing(
