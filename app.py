@@ -1339,31 +1339,31 @@ def _render_cost_hero(
     model_name: str,
 ) -> None:
     cost_items = [
-        ("All-time billed cost", _format_billed_total(provider_spend)),
-        (f"OpenAI billed cost, {recent_openai_billing.window_label}", _format_openai_billed(recent_openai_billing)),
-        ("Internal token-rate estimate", _format_currency(local_openai_estimate)),
+        ("OpenAI API + Tavily Search API + Streamlit Cloud hosting billed cost", _format_billed_total(provider_spend)),
+        (f"OpenAI API billed cost, {recent_openai_billing.window_label}", _format_openai_billed(recent_openai_billing)),
+        ("OpenAI API token-cost estimate from local token counts", _format_currency(local_openai_estimate)),
     ]
     usage_items = [
-        ("OpenAI tokens used", _format_int(total_tokens)),
+        ("OpenAI API tokens used", _format_int(total_tokens)),
         (
-            "Tavily credits used",
+            "Tavily Search API credits used",
             f"{_format_int(tavily_billing.credits_used)} of {_format_int(tavily_billing.included_monthly_credits)} included",
         ),
-        ("OpenAI scoring calls", _format_int(openai_calls)),
-        ("Last run API calls", _format_int(last_api_calls)),
-        ("Last run token-rate estimate", _format_currency(last_run_local_openai_estimate)),
+        ("OpenAI API scoring calls", _format_int(openai_calls)),
+        ("Last run OpenAI API + Tavily Search API calls", _format_int(last_api_calls)),
+        ("Last run OpenAI API token-cost estimate", _format_currency(last_run_local_openai_estimate)),
     ]
     detail_items = [
-        ("Live billing source", lifetime_openai_billing.source_label),
-        ("OpenAI project", lifetime_openai_billing.project_id or "None"),
-        ("Billing start", lifetime_openai_billing.window_start_label or "Unavailable"),
-        ("Last fetched", lifetime_openai_billing.fetched_at_label or "Unavailable"),
-        ("Billing data", _cache_status(lifetime_openai_billing)),
-        ("Tavily plan", f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"),
-        ("Streamlit Cloud hosting", _format_currency(provider_spend.hosting_billed_usd)),
+        ("OpenAI billing data source", lifetime_openai_billing.source_label),
+        ("OpenAI project ID", lifetime_openai_billing.project_id or "None"),
+        ("OpenAI billing start date", lifetime_openai_billing.window_start_label or "Unavailable"),
+        ("OpenAI billing last fetched", lifetime_openai_billing.fetched_at_label or "Unavailable"),
+        ("OpenAI billing cache", _cache_status(lifetime_openai_billing)),
+        ("Tavily Search API plan", f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"),
+        ("Streamlit Cloud hosting billed cost", _format_currency(provider_spend.hosting_billed_usd)),
     ]
 
-    body = ["<div class='cost-hero'><div class='cost-hero-title'>API usage and cost</div><div class='cost-hero-grid'>"]
+    body = ["<div class='cost-hero'><div class='cost-hero-title'>OpenAI API, Tavily Search API, and Streamlit Cloud hosting cost</div><div class='cost-hero-grid'>"]
     for label, value in [*cost_items, *usage_items]:
         value_class = "cost-hero-value compact" if len(str(value)) > 18 else "cost-hero-value"
         body.append(
@@ -1390,16 +1390,16 @@ def _render_cost_hero(
         and local_openai_estimate > 0
     ):
         body.append(
-            "<div class='billing-note'>Billed cost comes from live OpenAI billing data. "
-            f"The internal estimate uses configured token rates for {html.escape(_clean_ui_text(model_name))} and may differ from platform billing.</div>"
+            "<div class='billing-note'>OpenAI billed cost comes from the OpenAI billing API. "
+            f"The OpenAI API token-cost estimate uses configured token rates for {html.escape(_clean_ui_text(model_name))} and may differ from OpenAI billing.</div>"
         )
     if not lifetime_openai_billing.available:
         body.append(
-            "<div class='billing-note'>Live OpenAI billing unavailable. Showing the internal token-rate estimate instead.</div>"
+            "<div class='billing-note'>OpenAI billing API data is unavailable. Showing the OpenAI API token-cost estimate instead.</div>"
         )
     elif not lifetime_openai_billing.is_project_scoped:
         body.append(
-            "<div class='billing-note'>OpenAI returned organization-level billing. The all-time billed cost above excludes org-level OpenAI spend.</div>"
+            "<div class='billing-note'>OpenAI returned organization-level billing. The combined billed cost above excludes organization-level OpenAI cost.</div>"
         )
     body.append("</div>")
     st.markdown("".join(body), unsafe_allow_html=True)
@@ -1676,7 +1676,7 @@ def _stage_cost_frame(metrics: dict, settings) -> pd.DataFrame:
         if cost > 0:
             rows.append({"Stage": _humanize(row.get("run_type")), "Estimated USD": cost})
     if not rows:
-        rows = [{"Stage": "No local OpenAI estimate", "Estimated USD": 0.0}]
+        rows = [{"Stage": "No OpenAI API token-cost estimate from local token counts", "Estimated USD": 0.0}]
     return pd.DataFrame(rows)
 
 
@@ -1684,8 +1684,8 @@ def _resource_cost_frame(metrics: dict, settings) -> pd.DataFrame:
     tavily_billing = _tavily_billing_from_metrics(metrics, settings)
     openai_cost = _local_openai_estimate_usd(metrics, settings)
     rows = [
-        {"Resource": "Local OpenAI token estimate", "Estimated USD": openai_cost},
-        {"Resource": "Tavily shadow value, not billed", "Estimated USD": tavily_billing.shadow_estimate_usd},
+        {"API or service": "OpenAI API token-cost estimate from local token counts", "Estimated USD": openai_cost},
+        {"API or service": "Tavily Search API planning estimate, not billed while pay-as-you-go is off", "Estimated USD": tavily_billing.shadow_estimate_usd},
     ]
     return pd.DataFrame(rows)
 
@@ -2052,8 +2052,8 @@ if st.session_state.pop("start_paid_run_requested", False):
     st.session_state["last_action"] = {
         "message": (
             f"Scored {score_result.counts.get('scored', 0):,} companies from a {cap:,}-company {VERIFY_MODE_PRESETS.get(active_verify_mode, VERIFY_MODE_PRESETS['balanced'])['label'].lower()} batch. "
-            f"Local OpenAI token estimate: {_format_currency(run_openai_estimate)}. "
-            f"Tavily credits consumed: {run_tavily_credits:,}; Tavily billed spend: {_format_currency(run_tavily_billed)}."
+            f"OpenAI API token-cost estimate from local token counts: {_format_currency(run_openai_estimate)}. "
+            f"Tavily Search API credits used: {run_tavily_credits:,}; Tavily Search API billed cost: {_format_currency(run_tavily_billed)}."
         ),
         "level": level,
     }
@@ -2129,17 +2129,17 @@ if pending_verify_run:
     projected_rows = [
         ("Companies in this run", _format_int(pending_verify_run["cap"])),
         ("Eligible companies", f"{_format_int(broad_universe_pending)} of {_format_int(unique_universe_pending)} unique names"),
-        ("Search calls", _format_int(pending_verify_run["projected_tavily_calls"])),
-        ("Scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
-        ("OpenAI tokens", f"{_format_int(pending_verify_run['projected_prompt_tokens'])} input, {_format_int(pending_verify_run['projected_completion_tokens'])} output"),
-        ("Estimated provider cost", _format_currency(pending_verify_run["projected_total"])),
+        ("Tavily Search API calls", _format_int(pending_verify_run["projected_tavily_calls"])),
+        ("OpenAI API scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
+        ("Estimated OpenAI API tokens", f"{_format_int(pending_verify_run['projected_prompt_tokens'])} input, {_format_int(pending_verify_run['projected_completion_tokens'])} output"),
+        ("Estimated OpenAI API + Tavily Search API cost", _format_currency(pending_verify_run["projected_total"])),
         ("Estimated run time", _format_duration(int(pending_verify_run["estimated_seconds"]))),
     ]
     if projected_tavily_overage > 0 and not tavily_payg_enabled_pending:
         projected_rows.extend(
             [
-                ("Search credits over included plan", f"{_format_int(projected_tavily_overage)} credits, pay-as-you-go off"),
-                ("Search overage if enabled", _format_currency(float(pending_verify_run.get("projected_tavily_payg_if_enabled") or 0.0))),
+                ("Tavily Search API credits over included plan", f"{_format_int(projected_tavily_overage)} credits, pay-as-you-go off"),
+                ("Tavily Search API overage cost if pay-as-you-go is enabled", _format_currency(float(pending_verify_run.get("projected_tavily_payg_if_enabled") or 0.0))),
             ]
         )
     cascade_rows = [
@@ -2155,8 +2155,8 @@ slides = [
     {"key": "overview", "label": "Overview", "title": "Manifest list to scored companies.", "copy": "Load company names, remove excluded organization types and placeholder names, check company pages, run web search when page data is incomplete, then score the remaining companies."},
     {"key": "source", "label": "Step 1", "title": "Prepare the Manifest list.", "copy": "Load attendee company names, merge duplicate company names, and remove rows that match excluded organization types."},
     {"key": "homepage", "label": "Step 2", "title": "Check company pages.", "copy": "Read domains, page titles, descriptions, headings, and short homepage text before web search."},
-    {"key": "estimate", "label": "Step 3", "title": "Approve the run.", "copy": "Check the batch size, search volume, scoring volume, runtime, tokens, and estimated cost."},
-    {"key": "cost", "label": "Step 4", "title": "Track spend.", "copy": "View provider billing, included Tavily credits, and local token estimates separately."},
+    {"key": "estimate", "label": "Step 3", "title": "Approve the run.", "copy": "Check the batch size, Tavily Search API calls, OpenAI API scoring calls, runtime, OpenAI API tokens, and estimated API cost."},
+    {"key": "cost", "label": "Step 4", "title": "Track OpenAI API and Tavily Search API cost.", "copy": "View OpenAI API billing, Tavily Search API credits, and OpenAI token-count estimates separately."},
     {"key": "prospects", "label": "Step 5", "title": "View scored companies.", "copy": "Sort companies by total score and inspect the page text or search results used for scoring."},
     {"key": "routing", "label": "Step 6", "title": "View company page and web search counts.", "copy": "See which companies were scored from company page data and which companies were sent to web search."},
 ]
@@ -2186,7 +2186,7 @@ if slide["key"] == "overview":
             ("Company page", "Read domains, titles, descriptions, and snippets."),
             ("Web search", "Use Tavily when company page data is incomplete."),
             ("Score", "Score each company against Wittington criteria."),
-            ("Results", "Show scored companies and provider spend."),
+            ("Results", "Show scored companies, OpenAI API cost, and Tavily Search API cost."),
         ],
     )
 elif slide["key"] == "source":
@@ -2195,7 +2195,7 @@ elif slide["key"] == "source":
             ("Raw rows", _format_int(metrics["raw_companies"])),
             ("Unique names", _format_int(metrics["unique_companies"])),
             ("Rows kept for page checks and search", _format_int(candidate_count)),
-            ("Provider cost", "$0.0000"),
+            ("OpenAI API + Tavily Search API cost", "$0.0000"),
         ]
     )
     _render_summary_card(
@@ -2254,9 +2254,9 @@ elif slide["key"] == "estimate":
         _render_mini_metrics(
             [
                 ("Companies", _format_int(pending_verify_run["cap"])),
-                ("Search calls", _format_int(pending_verify_run["projected_tavily_calls"])),
-                ("Scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
-                ("Estimated cost", _format_currency(pending_verify_run["projected_total"])),
+                ("Tavily Search API calls", _format_int(pending_verify_run["projected_tavily_calls"])),
+                ("OpenAI API scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
+                ("Estimated OpenAI API + Tavily Search API cost", _format_currency(pending_verify_run["projected_total"])),
             ]
         )
         _render_summary_card("Run estimate", projected_rows)
@@ -2270,9 +2270,9 @@ elif slide["key"] == "estimate":
 elif slide["key"] == "cost":
     _render_mini_metrics(
         [
-            ("Actual billed cost", _format_billed_total(provider_spend)),
-            ("OpenAI tokens", _format_int(int(run_totals.get("total_tokens") or 0))),
-            ("Search credits used", _format_int(tavily_billing.credits_used)),
+            ("OpenAI API + Tavily Search API + Streamlit Cloud hosting billed cost", _format_billed_total(provider_spend)),
+            ("OpenAI API tokens", _format_int(int(run_totals.get("total_tokens") or 0))),
+            ("Tavily Search API credits used", _format_int(tavily_billing.credits_used)),
             ("Scored from company pages", _format_int(tavily_avoided)),
         ]
     )
