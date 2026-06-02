@@ -331,7 +331,7 @@ def collect_homepage_evidence(
     max_domain_attempts: int | None = None,
 ) -> PipelineResult:
     configured_limit = _setting_int(settings, "homepage_evidence_max_per_run", 100)
-    limit = min(limit or configured_limit, configured_limit)
+    limit = configured_limit if limit is None else max(1, int(limit))
     run_id = db.start_run(conn, "homepage_evidence")
     companies = db.candidates_for_homepage_evidence(conn, limit=limit, mode=mode, force=force)
     processed = 0

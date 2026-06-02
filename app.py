@@ -1638,13 +1638,13 @@ def _render_processing_controls(candidate_count: int, current_cap: int) -> int:
     index = options.index(current_cap)
     st.markdown(
         "<div class='control-group'>"
-        "<div class='control-title'>Rows to process after exclusions</div>"
-        "<div class='control-copy'>This sets the maximum number of companies that can move through company-page checks, Tavily Search API, and OpenAI API scoring.</div>"
+        "<div class='control-title'>Rows to analyze after exclusions</div>"
+        "<div class='control-copy'>This sets the maximum number of companies for company-page checks, Tavily Search API, and OpenAI API scoring.</div>"
         "</div>",
         unsafe_allow_html=True,
     )
     selected_cap = st.radio(
-        "Rows to process after exclusions",
+        "Rows to analyze after exclusions",
         options,
         index=index,
         format_func=lambda value: _row_count_label(int(value), candidate_count),
@@ -1732,7 +1732,7 @@ def _tavily_billing_from_metrics(metrics: dict, settings) -> TavilyBillingSummar
 def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> dict:
     homepage_candidates = db.candidates_for_homepage_evidence(
         conn,
-        limit=min(cap, _setting_int(settings, "homepage_evidence_max_per_run", 100)),
+        limit=cap,
         mode=mode,
         force=False,
     )
@@ -2268,10 +2268,7 @@ if st.session_state.pop("prepare_manifest_requested", False):
 
 if st.session_state.pop("check_company_pages_requested", False):
     active_verify_mode = st.session_state.get("active_verify_mode", verify_mode)
-    homepage_cap = min(
-        max(1, int(st.session_state.get("homepage_check_cap", _setting_int(settings, "homepage_evidence_max_per_run", 100)))),
-        _setting_int(settings, "homepage_evidence_max_per_run", 100),
-    )
+    homepage_cap = max(1, int(st.session_state.get("homepage_check_cap", int(prospect_cap or 1))))
     progress = st.progress(0, text=f"Checking up to {homepage_cap:,} company pages...")
 
     def homepage_progress(index, total, result, counts):
@@ -2665,12 +2662,15 @@ elif slide["key"] == "exclusions":
     elif workflow_stage == 2:
         st.warning("Normalize company names before removing excluded rows.")
 elif slide["key"] == "homepage":
+    if workflow_stage >= 4:
+        prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
+        pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode)
+        pending_mode = pending_verify_run.get("mode", verify_mode)
     homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
     homepage_scoreable = int(cascade_summary.get("score_from_homepage") or 0)
     homepage_needs_search = int(cascade_summary.get("needs_tavily") or 0)
     homepage_data_gaps = int(cascade_summary.get("data_gaps") or 0)
     homepage_pending = int((pending_verify_run or {}).get("projected_homepage_candidates") or 0)
-    homepage_check_cap = min(homepage_pending or _setting_int(settings, "homepage_evidence_max_per_run", 100), _setting_int(settings, "homepage_evidence_max_per_run", 100))
     if workflow_stage < 4:
         footer_action_label = "Check company pages"
         footer_action_disabled = True
@@ -2679,7 +2679,7 @@ elif slide["key"] == "homepage":
         footer_action_label = "Next"
         footer_action_target = "next"
     else:
-        footer_action_label = f"Check {homepage_check_cap:,} company pages"
+        footer_action_label = "Check company pages"
         footer_action_target = "check_company_pages"
     _render_mini_metrics(
         [
@@ -2874,10 +2874,7 @@ if footer_clicked:
         st.session_state["prepare_manifest_requested"] = True
     elif footer_action_target == "check_company_pages":
         st.session_state["active_verify_mode"] = pending_mode
-        st.session_state["homepage_check_cap"] = min(
-            int((pending_verify_run or {}).get("projected_homepage_candidates") or _setting_int(settings, "homepage_evidence_max_per_run", 100)),
-            _setting_int(settings, "homepage_evidence_max_per_run", 100),
-        )
+        st.session_state["homepage_check_cap"] = int(prospect_cap)
         st.session_state["check_company_pages_requested"] = True
     elif footer_action_target == "start_paid_run":
         st.session_state["active_verify_mode"] = pending_mode
