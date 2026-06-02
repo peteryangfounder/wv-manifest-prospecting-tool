@@ -63,7 +63,7 @@ DISPLAY_LABELS = {
     "consulting": "Consulting",
     "consulting_or_agency": "Consulting or agency",
     "consumer": "Consumer",
-    "data_confidence": "Evidence confidence",
+    "data_confidence": "Source confidence",
     "duplicate_or_noisy_entry": "Placeholder or noisy entry",
     "fintech": "Fintech",
     "food": "Food",
@@ -92,8 +92,8 @@ DISPLAY_LABELS = {
     "technology": "Technology",
     "traction_signal": "Traction signal",
     "university_government_nonprofit": "University, government, or nonprofit",
-    "unknown": "Needs evidence",
-    "unknown_needs_enrichment": "Needs evidence",
+    "unknown": "Needs source details",
+    "unknown_needs_enrichment": "Needs source details",
     "venture_backability": "Venture backability",
     "warehouse_automation": "Warehouse automation",
     "wittington_edge": "Wittington edge",
@@ -150,7 +150,7 @@ CUSTOM_CSS = """
     --wv-ink: #1f2433;
     --wv-muted: #667085;
     --wv-line: #dfe4ec;
-    --wv-soft: #f6f8fb;
+    --wv-soft: #f8fafc;
     --wv-accent: #1f6f5b;
     --wv-accent-soft: #eaf5f1;
   }
@@ -160,12 +160,11 @@ CUSTOM_CSS = """
     visibility: hidden;
   }
   .stApp {
-    background:
-      linear-gradient(180deg, #f7f9fb 0%, #ffffff 38%, #ffffff 100%);
+    background: #ffffff;
   }
   .block-container {
-    max-width: 1120px;
-    padding-top: 1.5rem;
+    max-width: 980px;
+    padding-top: 1.1rem;
     padding-bottom: 2rem;
   }
   h1, h2, h3 {
@@ -173,8 +172,8 @@ CUSTOM_CSS = """
   }
   .wv-header {
     border-bottom: 1px solid var(--wv-line);
-    margin-bottom: 0.85rem;
-    padding: 0.2rem 0 0.8rem 0;
+    margin-bottom: 0.65rem;
+    padding: 0.15rem 0 0.7rem 0;
   }
   .wv-eyebrow {
     color: #5d6675;
@@ -188,7 +187,7 @@ CUSTOM_CSS = """
   }
   .wv-title {
     color: var(--wv-ink);
-    font-size: clamp(1.7rem, 3vw, 2.35rem);
+    font-size: clamp(1.55rem, 2.5vw, 2rem);
     font-weight: 780;
     line-height: 1.08;
     margin: 0;
@@ -197,7 +196,7 @@ CUSTOM_CSS = """
   }
   .wv-subtitle {
     color: var(--wv-muted);
-    font-size: 0.92rem;
+    font-size: 0.88rem;
     margin: 0.45rem 0 0 0;
     max-width: 700px;
   }
@@ -230,11 +229,9 @@ CUSTOM_CSS = """
   }
   .slide-shell {
     background: #ffffff;
-    border: 1px solid var(--wv-line);
-    border-radius: 8px;
-    box-shadow: 0 14px 36px rgba(31, 36, 51, 0.06);
-    margin: 0.85rem 0 0.85rem 0;
-    padding: 1.1rem 1.15rem;
+    border-bottom: 1px solid #eef1f5;
+    margin: 0.65rem 0 0.95rem 0;
+    padding: 0.7rem 0 0.85rem 0;
   }
   .slide-label {
     color: var(--wv-accent);
@@ -245,14 +242,14 @@ CUSTOM_CSS = """
   }
   .slide-title {
     color: var(--wv-ink);
-    font-size: clamp(1.45rem, 2.5vw, 2.05rem);
+    font-size: clamp(1.35rem, 2.25vw, 1.8rem);
     font-weight: 780;
     line-height: 1.16;
     margin-top: 0.2rem;
   }
   .slide-copy {
     color: var(--wv-muted);
-    font-size: 0.98rem;
+    font-size: 0.94rem;
     line-height: 1.45;
     margin: 0.42rem 0 0 0;
     max-width: 860px;
@@ -297,38 +294,48 @@ CUSTOM_CSS = """
   }
   .flow-grid {
     display: grid;
-    gap: 0.6rem;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    margin: 0.85rem 0 0.2rem 0;
+    gap: 0;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    margin: 1rem 0 0.6rem 0;
   }
   .flow-step {
     background: #ffffff;
-    border: 1px solid var(--wv-line);
-    border-radius: 8px;
-    padding: 0.78rem;
+    border-top: 2px solid #d9dee7;
+    min-width: 0;
+    padding: 0.95rem 0.55rem 0 0;
+    position: relative;
+  }
+  .flow-step::before {
+    background: #ffffff;
+    border: 2px solid #2f6b5b;
+    border-radius: 999px;
+    content: "";
+    height: 0.72rem;
+    left: 0;
+    position: absolute;
+    top: -0.43rem;
+    width: 0.72rem;
+  }
+  .flow-step:first-child {
+    border-top-color: #2f6b5b;
   }
   .flow-number {
-    align-items: center;
-    background: var(--wv-accent-soft);
-    border-radius: 999px;
     color: var(--wv-accent);
-    display: inline-flex;
-    font-size: 0.78rem;
+    display: block;
+    font-size: 0.72rem;
     font-weight: 800;
-    height: 1.45rem;
-    justify-content: center;
-    margin-bottom: 0.45rem;
-    width: 1.45rem;
+    line-height: 1;
+    margin-bottom: 0.38rem;
   }
   .flow-title {
     color: var(--wv-ink);
-    font-size: 0.94rem;
+    font-size: 0.9rem;
     font-weight: 780;
     line-height: 1.25;
   }
   .flow-copy {
     color: var(--wv-muted);
-    font-size: 0.84rem;
+    font-size: 0.8rem;
     line-height: 1.35;
     margin-top: 0.22rem;
   }
@@ -765,6 +772,13 @@ CUSTOM_CSS = """
     min-width: 0;
     overflow-wrap: anywhere;
   }
+  .prospect-support-title {
+    color: #202332;
+    font-size: 0.78rem;
+    font-weight: 760;
+    margin-bottom: 0.22rem;
+    text-transform: uppercase;
+  }
   .source-list {
     display: grid;
     gap: 0.75rem;
@@ -863,6 +877,10 @@ CUSTOM_CSS = """
     margin-top: 0.45rem;
   }
   @media (max-width: 1100px) {
+    .flow-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      row-gap: 1.05rem;
+    }
     .summary-grid {
       grid-template-columns: 1fr;
     }
@@ -889,6 +907,20 @@ CUSTOM_CSS = """
     }
   }
   @media (max-width: 760px) {
+    .flow-grid {
+      grid-template-columns: 1fr;
+      gap: 0.75rem;
+      margin-top: 0.8rem;
+    }
+    .flow-step {
+      border-left: 2px solid #d9dee7;
+      border-top: 0;
+      padding: 0 0 0.9rem 1.15rem;
+    }
+    .flow-step::before {
+      left: -0.43rem;
+      top: 0.05rem;
+    }
     .step-row {
       grid-template-columns: 2rem 1fr;
     }
@@ -1249,7 +1281,7 @@ def _render_flow_steps(items: list[tuple[str, str]]) -> None:
     for index, (title, copy) in enumerate(items, start=1):
         body.append(
             "<div class='flow-step'>"
-            f"<div class='flow-number'>{index}</div>"
+            f"<div class='flow-number'>STEP {index}</div>"
             f"<div class='flow-title'>{html.escape(_clean_ui_text(title))}</div>"
             f"<div class='flow-copy'>{html.escape(_clean_ui_text(copy))}</div>"
             "</div>"
@@ -1273,11 +1305,11 @@ def _route_examples_html(examples: list[dict], empty_message: str = "No cached e
             f"<div class='route-kicker'>{html.escape(_clean_ui_text(_humanize(example.get('route_decision') or 'unrouted')))}</div>"
             f"<div class='route-company'>{html.escape(_clean_ui_text(example.get('canonical_name')))}</div>"
             f"<div class='route-meta'>Domain: {html.escape(_clean_ui_text(domain))}</div>"
-            f"<div class='route-meta'>Confidence: {_format_percent(confidence)} domain, {_format_percent(quality)} evidence</div>"
+            f"<div class='route-meta'>Match strength: {_format_percent(confidence)} domain, {_format_percent(quality)} homepage metadata</div>"
             f"<div class='route-meta'>Positive: {_signal_pills(positives, 'None')}</div>"
             f"<div class='route-meta'>Negative: {_signal_pills(negatives, 'None')}</div>"
-            f"<div class='route-snippet'>{html.escape(_clean_ui_text(_truncate(example.get('evidence_text') or example.get('fetch_error') or 'No homepage snippet available.', 220)))}</div>"
-            f"<div class='route-meta'>Why: {html.escape(_clean_ui_text(example.get('route_reason') or 'No route reason recorded.'))}</div>"
+            f"<div class='route-snippet'>{html.escape(_clean_ui_text(_truncate(example.get('evidence_text') or example.get('fetch_error') or 'No homepage metadata available.', 220)))}</div>"
+            f"<div class='route-meta'>Decision reason: {html.escape(_clean_ui_text(example.get('route_reason') or 'No routing reason recorded.'))}</div>"
             "</div>"
         )
     body.append("</div>")
@@ -1417,13 +1449,13 @@ def _render_guided_steps(metrics: dict) -> None:
         _step_row(
             2,
             "Verify prospects",
-            "Preview evidence first. Use paid search and AI only after confirmation.",
+            "Preview homepage metadata first. Use paid search and AI only after confirmation.",
             "Done" if stage > 2 else "Active" if stage == 2 else "Locked",
         ),
         _step_row(
             3,
             "Review results",
-            "Review ranked prospects, evidence, and CSV exports.",
+            "Review ranked prospects, source details, and CSV exports.",
             "Active" if stage == 3 else "Locked",
         ),
     ]
@@ -1793,7 +1825,7 @@ def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
         source_url = row.get("homepage_resolved_url") or row.get("website") or row.get("primary_source_url") or ""
         snippets = row.get("top_snippets") or []
         support_snippet = row.get("support_preview") or (snippets[0] if snippets else "")
-        support_snippet = _clean_ui_text(_truncate(support_snippet or row.get("evidence_summary") or "No evidence snippet available.", 160))
+        support_snippet = _clean_ui_text(_truncate(support_snippet or row.get("evidence_summary") or "No supporting source detail available.", 160))
         evidence_confidence = (
             _format_percent(float(row.get("homepage_evidence_quality") or 0.0))
             if float(row.get("homepage_evidence_quality") or 0.0) > 0
@@ -1804,7 +1836,7 @@ def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
             "<div class='prospect-main'>"
             f"<div class='prospect-rank'>Rank {rank}</div>"
             f"<div class='prospect-name'>{html.escape(_clean_ui_text(row.get('canonical_name')))}</div>"
-            f"<div class='route-meta'>Evidence source: {html.escape(evidence_source)}</div>"
+            f"<div class='route-meta'>Source detail: {html.escape(evidence_source)}</div>"
             f"<div class='route-meta'>Source URL: {_safe_link(str(source_url or ''), 'Open') if source_url else 'None'}</div>"
             "</div>"
             "<div class='prospect-score'>"
@@ -1818,11 +1850,12 @@ def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
             f"<div class='prospect-tags'>{_tag_pills(row.get('sector_tags'))}</div>"
             "</div>"
             "<div class='prospect-evidence'>"
-            f"<strong>Support:</strong> {html.escape(support_snippet)}"
+            "<div class='prospect-support-title'>Why it ranked</div>"
+            f"{html.escape(support_snippet)}"
             f"<div class='route-meta'>Positive: {_signal_pills(row.get('homepage_positive_signals'), 'Not captured')}</div>"
             f"<div class='route-meta'>Negative: {_signal_pills(row.get('homepage_negative_signals'), 'Not captured')}</div>"
-            f"<div class='route-meta'>Evidence confidence: {html.escape(_clean_ui_text(evidence_confidence))}</div>"
-            f"<div class='route-meta'>Uncertainty: {html.escape(_clean_ui_text(row.get('homepage_route_reason') or row.get('evidence_summary') or 'No data-gap reason recorded.'))}</div>"
+            f"<div class='route-meta'>Source confidence: {html.escape(_clean_ui_text(evidence_confidence))}</div>"
+            f"<div class='route-meta'>Open question: {html.escape(_clean_ui_text(row.get('homepage_route_reason') or row.get('evidence_summary') or 'No data-gap reason recorded.'))}</div>"
             "</div>"
             "</div>"
         )
@@ -1903,7 +1936,7 @@ def _render_workflow(metrics: dict) -> None:
                 else "Load and classify the attendee file"
             ),
             prospect_caption=(
-                f"{_format_int(metrics.get('openai_scored'))} companies verified with external evidence"
+                f"{_format_int(metrics.get('openai_scored'))} companies scored with source details"
                 if has_verified
                 else "Enrich and score a capped batch"
             ),
@@ -1969,7 +2002,7 @@ if st.session_state.pop("start_paid_run_requested", False):
     progress = st.progress(0, text=f"Refreshing source screening before verifying up to {cap:,} companies...")
     preview = st.empty()
     classify_result = run_deterministic_classification(conn)
-    progress.progress(0.05, text="Collecting bounded homepage metadata before paid search...")
+    progress.progress(0.05, text="Reading bounded homepage metadata before paid search...")
 
     homepage_result = collect_homepage_evidence(
         conn,
@@ -2121,21 +2154,21 @@ if pending_verify_run:
         )
     cascade_rows = [
         ("API-eligible companies", _format_int(pending_verify_run.get("api_eligible_companies") or broad_universe_pending)),
-        ("Homepage evidence attempted", _format_int(pending_verify_run.get("homepage_attempted") or 0)),
-        ("Homepage-positive companies", _format_int(pending_verify_run.get("cached_homepage_ready") or 0)),
+        ("Homepages checked", _format_int(pending_verify_run.get("homepage_attempted") or 0)),
+        ("Metadata enough", _format_int(pending_verify_run.get("cached_homepage_ready") or 0)),
         ("Search calls avoided", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
         ("Needs search", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
         ("Data gaps", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
     ]
 
 slides = [
-    {"key": "overview", "label": "Overview", "title": "The app teaches one pipeline, one step at a time.", "copy": "Manifest list -> first screen -> homepage evidence -> paid search -> AI scoring -> ranked prospects -> cost reporting."},
-    {"key": "source", "label": "Step 1", "title": "Start with the raw Manifest list.", "copy": "Load the attendee file, normalize company names, deduplicate rows, and remove obvious non-prospects before any paid APIs."},
-    {"key": "homepage", "label": "Step 2", "title": "Use cheap homepage evidence first.", "copy": "The app attempts bounded homepage/domain evidence before Tavily so companies are not judged from names alone."},
+    {"key": "overview", "label": "Overview", "title": "One clear venture-sourcing pipeline.", "copy": "Start with the Manifest attendee list. Remove obvious non-prospects. Read homepage metadata. Use paid search only when needed. Score and rank the best prospects."},
+    {"key": "source", "label": "Step 1", "title": "Start with the raw Manifest list.", "copy": "Load attendee company names, clean duplicates, and remove rows that are clearly not venture prospects before any paid API runs."},
+    {"key": "homepage", "label": "Step 2", "title": "Read homepage metadata before paid search.", "copy": "The app checks domains, page titles, descriptions, headings, and short homepage text so companies are not judged by name alone."},
     {"key": "estimate", "label": "Step 3", "title": "Confirm spend before paid search and AI.", "copy": "Before provider calls start, the app shows projected search calls, OpenAI scoring calls, tokens, runtime, and provider cost."},
     {"key": "cost", "label": "Step 4", "title": "Track actual cost and resource use.", "copy": "The billing view separates live provider-billed cost from internal token-rate estimates and included Tavily credits."},
-    {"key": "prospects", "label": "Step 5", "title": "Review ranked prospects.", "copy": "Prospect cards show score, supporting evidence, source, signals, and uncertainty."},
-    {"key": "routing", "label": "Step 6", "title": "See what the evidence cascade saved.", "copy": "The final screen shows homepage evidence coverage, rows that still need search, data gaps, and search calls avoided."},
+    {"key": "prospects", "label": "Step 5", "title": "Review ranked prospects.", "copy": "Prospect cards show score, source details, homepage signals, and open questions."},
+    {"key": "routing", "label": "Step 6", "title": "See how homepage metadata reduced paid search.", "copy": "The final screen shows homepage checks, rows that still need search, data gaps, and search calls avoided."},
 ]
 slide_count = len(slides)
 slide_index = int(st.session_state.get("slide_index", 0))
@@ -2147,7 +2180,7 @@ st.markdown(
     """
     <div class="wv-header">
       <h1 class="wv-title">Manifest Prospecting Tool</h1>
-      <p class="wv-subtitle">A slide-by-slide walkthrough of the sourcing pipeline, cost controls, and ranked results.</p>
+      <p class="wv-subtitle">A focused walkthrough of the Manifest-to-prospect pipeline.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -2160,9 +2193,9 @@ if slide["key"] == "overview":
         [
             ("Source", "Manifest companies are cleaned and deduplicated."),
             ("Screen", "Obvious non-prospects are removed without paid APIs."),
-            ("Evidence", "Homepage metadata is checked before paid search."),
-            ("Search", "Tavily runs only when evidence is missing or unclear."),
-            ("Score", "OpenAI scores compact evidence packets, not raw names."),
+            ("Homepage metadata", "Domains, titles, descriptions, and snippets are checked first."),
+            ("Paid search", "Tavily runs only when homepage metadata is missing or unclear."),
+            ("AI score", "OpenAI scores compact source details, not raw names."),
             ("Report", "Prospects and provider costs are shown separately."),
         ],
     )
@@ -2181,7 +2214,7 @@ elif slide["key"] == "source":
             ("Input", "Public Manifest attendee list"),
             ("Cleaning", "Normalize names and remove duplicate entries"),
             ("Filtering", "Remove obvious incumbents, investors, associations, services, and noisy rows"),
-            ("Result", f"{_format_int(candidate_count)} companies remain eligible for evidence collection"),
+            ("Result", f"{_format_int(candidate_count)} companies remain eligible for homepage metadata and search"),
         ],
     )
     if workflow_stage == 1 and st.button("Load and screen Manifest list", type="primary", use_container_width=True):
@@ -2190,8 +2223,8 @@ elif slide["key"] == "source":
 elif slide["key"] == "homepage":
     _render_mini_metrics(
         [
-            ("Homepage checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
-            ("Homepage sufficient", _format_int(cascade_summary.get("score_from_homepage") or 0)),
+            ("Homepages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
+            ("Metadata enough", _format_int(cascade_summary.get("score_from_homepage") or 0)),
             ("Needs search", _format_int(cascade_summary.get("needs_tavily") or 0)),
             ("Data gaps", _format_int(cascade_summary.get("data_gaps") or 0)),
         ]
@@ -2199,13 +2232,13 @@ elif slide["key"] == "homepage":
     _render_summary_card(
         "Why this matters",
         [
-            ("Avoids name-only judgment", "Evidence comes from domains, metadata, snippets, and route reasons."),
+            ("Avoids name-only judgment", "The app reads domains, page metadata, snippets, and routing reasons."),
             ("Reduces paid search", f"{_format_int(tavily_avoided)} search calls avoided so far."),
-            ("Protects recall", "Unclear homepage evidence routes to search instead of becoming a hard rejection."),
+            ("Protects recall", "Unclear homepage metadata routes to search instead of becoming a hard rejection."),
         ],
     )
-    if pending_verify_run and st.button("Preview homepage evidence - no paid APIs", type="primary", use_container_width=True):
-        with st.spinner("Collecting bounded homepage/domain evidence without paid provider calls..."):
+    if pending_verify_run and st.button("Preview homepage metadata - no paid APIs", type="primary", use_container_width=True):
+        with st.spinner("Reading bounded homepage and domain metadata without paid provider calls..."):
             run_deterministic_classification(conn)
             preview_cap = max(1, min(int(pending_verify_run["cap"]), _setting_int(runtime_settings, "homepage_preview_max_per_click", 1)))
             preview_settings = replace(
@@ -2222,7 +2255,7 @@ elif slide["key"] == "homepage":
                 max_domain_attempts=1,
             )
         st.session_state["last_action"] = {
-            "message": f"Homepage preview checked {_format_int(preview_result.counts.get('processed'))} sample company. No Tavily or OpenAI calls were made.",
+            "message": f"Homepage metadata preview checked {_format_int(preview_result.counts.get('processed'))} sample company. No Tavily or OpenAI calls were made.",
             "level": "success",
         }
         st.rerun()
@@ -2237,7 +2270,7 @@ elif slide["key"] == "estimate":
             ]
         )
         _render_summary_card("Before paid calls", projected_rows)
-        _render_summary_card("Evidence routing", cascade_rows)
+        _render_summary_card("Homepage-to-search routing", cascade_rows)
         if st.button("Confirm paid search and AI run", type="primary", use_container_width=True):
             st.session_state["active_verify_mode"] = pending_mode
             st.session_state["start_paid_run_requested"] = True
@@ -2268,7 +2301,7 @@ elif slide["key"] == "cost":
 elif slide["key"] == "prospects":
     _render_prospect_cards(
         prospects.head(5),
-        "No AI-scored prospects yet. Run the evidence cascade first.",
+        "No AI-scored prospects yet. Run the homepage-to-search pipeline first.",
     )
 elif slide["key"] == "routing":
     cols = st.columns((1, 1))
@@ -2277,8 +2310,8 @@ elif slide["key"] == "routing":
             "Cascade counts",
             [
                 ("API-eligible", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
-                ("Homepage checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
-                ("Homepage sufficient", _format_int(cascade_summary.get("score_from_homepage") or 0)),
+                ("Homepages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
+                ("Metadata enough", _format_int(cascade_summary.get("score_from_homepage") or 0)),
                 ("Needs search", _format_int(cascade_summary.get("needs_tavily") or 0)),
                 ("Data gaps", _format_int(cascade_summary.get("data_gaps") or 0)),
             ],
