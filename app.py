@@ -18,6 +18,7 @@ from src.billing import (
     TavilyBillingSummary,
     calculate_provider_billed_spend,
     calculate_tavily_billing,
+    fetch_tavily_usage_snapshot,
     fetch_openai_billing_snapshot,
 )
 from src.config import PROJECT_ROOT, get_settings
@@ -1571,6 +1572,7 @@ def _render_cost_hero(
     cost_items = [
         ("OpenAI API + Tavily Search API + Streamlit Cloud hosting billed cost", _format_billed_total(provider_spend)),
         (f"OpenAI API billed cost, {recent_openai_billing.window_label}", _format_openai_billed(recent_openai_billing)),
+        ("Tavily Search API pay-as-you-go billed cost", _format_currency(tavily_billing.actual_billed_usd)),
         ("OpenAI API token-cost estimate from local token counts", _format_currency(local_openai_estimate)),
     ]
     usage_items = [
@@ -1589,6 +1591,8 @@ def _render_cost_hero(
         ("OpenAI billing start date", lifetime_openai_billing.window_start_label or "Unavailable"),
         ("OpenAI billing last fetched", lifetime_openai_billing.fetched_at_label or "Unavailable"),
         ("OpenAI billing cache", _cache_status(lifetime_openai_billing)),
+        ("Tavily usage data source", tavily_billing.source_label),
+        ("Tavily usage last fetched", tavily_billing.fetched_at_label or "Unavailable"),
         ("Tavily Search API plan", f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"),
         ("Streamlit Cloud hosting billed cost", _format_currency(provider_spend.hosting_billed_usd)),
     ]
@@ -1839,13 +1843,15 @@ def _last_run_local_openai_estimate_usd(last_run: dict) -> float:
 
 def _tavily_billing_from_metrics(metrics: dict, settings) -> TavilyBillingSummary:
     totals = metrics.get("run_totals") or {}
-    return calculate_tavily_billing(
-        credits_used=int(totals.get("tavily_calls") or 0),
+    return fetch_tavily_usage_snapshot(
+        api_key=_setting(settings, "tavily_api_key", None),
+        fallback_credits_used=int(totals.get("tavily_calls") or 0),
         included_monthly_credits=_setting(settings, "tavily_included_monthly_credits", 1000),
         pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", False),
         payg_price_per_credit_usd=_setting(settings, "tavily_payg_price_per_credit_usd", 0.008),
         plan_name=_setting(settings, "tavily_plan_name", "Researcher"),
         shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.008),
+        cache_ttl_seconds=_setting_int(settings, "openai_billing_cache_ttl_seconds", 300),
     )
 
 

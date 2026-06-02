@@ -10,6 +10,7 @@ import requests
 
 OPENAI_COSTS_URL = "https://api.openai.com/v1/organization/costs"
 OPENAI_COMPLETIONS_USAGE_URL = "https://api.openai.com/v1/organization/usage/completions"
+TAVILY_USAGE_URL = "https://api.tavily.com/usage"
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,10 @@ class TavilyBillingSummary:
     actual_billed_usd: float
     shadow_estimate_usd: float
     status: str
+    source_label: str = "Local Tavily run records"
+    fetched_at_label: str | None = None
+    error: str | None = None
+    is_live: bool = False
 
 
 @dataclass(frozen=True)
@@ -110,6 +115,113 @@ def calculate_tavily_billing(
         actual_billed_usd=actual_billed_usd,
         shadow_estimate_usd=shadow_estimate_usd,
         status=status,
+    )
+
+
+def fetch_tavily_usage_snapshot(
+    *,
+    api_key: str | None,
+    fallback_credits_used: int = 0,
+    included_monthly_credits: int = 1000,
+    pay_as_you_go_enabled: bool = False,
+    payg_price_per_credit_usd: float = 0.008,
+    plan_name: str = "Researcher",
+    shadow_price_per_credit_usd: float = 0.008,
+    cache_ttl_seconds: int = 300,
+    session: requests.Session | None = None,
+    now: float | None = None,
+) -> TavilyBillingSummary:
+    current_time = float(now if now is not None else time.time())
+    fetched_at_label = _format_epoch_datetime(int(current_time))
+    fallback = calculate_tavily_billing(
+        credits_used=fallback_credits_used,
+        included_monthly_credits=included_monthly_credits,
+        pay_as_you_go_enabled=pay_as_you_go_enabled,
+        payg_price_per_credit_usd=payg_price_per_credit_usd,
+        plan_name=plan_name,
+        shadow_price_per_credit_usd=shadow_price_per_credit_usd,
+    )
+    if not api_key:
+        return TavilyBillingSummary(
+            **{**fallback.__dict__, "source_label": "Live Tavily usage unavailable", "fetched_at_label": fetched_at_label, "error": "TAVILY_API_KEY is not configured.", "is_live": False}
+        )
+
+    client = session or requests.Session()
+    errors: list[str] = []
+    request_attempts = [
+        {"Authorization": f"Bearer {api_key}"},
+        {"X-API-Key": api_key},
+    ]
+    for headers in request_attempts:
+        try:
+            response = client.get(TAVILY_USAGE_URL, headers=headers, timeout=20)
+            response.raise_for_status()
+            parsed = parse_tavily_usage_response(
+                response.json(),
+                fallback=fallback,
+                fallback_payg_price_per_credit_usd=payg_price_per_credit_usd,
+            )
+            return TavilyBillingSummary(
+                **{
+                    **parsed.__dict__,
+                    "source_label": "Live from Tavily usage API",
+                    "fetched_at_label": fetched_at_label,
+                    "is_live": True,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 - retain local fallback if Tavily usage API is unavailable.
+            errors.append(_sanitize_error(str(exc)))
+
+    return TavilyBillingSummary(
+        **{
+            **fallback.__dict__,
+            "source_label": "Live Tavily usage unavailable; using local run records",
+            "fetched_at_label": fetched_at_label,
+            "error": "; ".join(error for error in errors if error)[:240] or "Unknown Tavily usage API error.",
+            "is_live": False,
+        }
+    )
+
+
+def parse_tavily_usage_response(
+    payload: dict[str, Any],
+    *,
+    fallback: TavilyBillingSummary,
+    fallback_payg_price_per_credit_usd: float = 0.008,
+) -> TavilyBillingSummary:
+    credits_used = _first_numeric(payload, ("credits_used", "used_credits", "total_credits_used", "current_usage", "monthly_usage", "usage"))
+    included = _first_numeric(payload, ("included_credits", "included_monthly_credits", "monthly_credit_limit", "credit_limit", "credits_limit", "plan_limit", "limit"))
+    remaining = _first_numeric(payload, ("credits_remaining", "remaining_credits", "free_credits_remaining"))
+    payg_spend = _first_numeric(payload, ("paygo_spend", "payg_spend", "pay_as_you_go_spend", "paygo_cost", "payg_cost", "overage_cost"))
+    payg_enabled = _first_bool(payload, ("pay_as_you_go_enabled", "paygo_enabled", "payg_enabled"))
+    plan_name = _first_text(payload, ("plan_name", "plan", "tier", "current_plan"))
+
+    resolved_included = int(included) if included is not None else fallback.included_monthly_credits
+    if credits_used is None and remaining is not None:
+        credits_used = max(0, resolved_included - int(remaining))
+    resolved_used = int(credits_used) if credits_used is not None else fallback.credits_used
+    resolved_payg_enabled = fallback.pay_as_you_go_enabled if payg_enabled is None else payg_enabled
+    resolved_plan = plan_name or fallback.plan_name
+
+    calculated = calculate_tavily_billing(
+        credits_used=resolved_used,
+        included_monthly_credits=resolved_included,
+        pay_as_you_go_enabled=resolved_payg_enabled,
+        payg_price_per_credit_usd=fallback_payg_price_per_credit_usd,
+        plan_name=resolved_plan,
+        shadow_price_per_credit_usd=fallback_payg_price_per_credit_usd,
+    )
+    actual_billed = float(payg_spend) if payg_spend is not None else calculated.actual_billed_usd
+    return TavilyBillingSummary(
+        plan_name=calculated.plan_name,
+        credits_used=calculated.credits_used,
+        included_monthly_credits=calculated.included_monthly_credits,
+        free_credits_remaining=calculated.free_credits_remaining,
+        pay_as_you_go_enabled=calculated.pay_as_you_go_enabled,
+        overage_credits=calculated.overage_credits,
+        actual_billed_usd=actual_billed,
+        shadow_estimate_usd=calculated.shadow_estimate_usd,
+        status=calculated.status,
     )
 
 
@@ -398,6 +510,52 @@ def _safe_float(value: Any) -> float:
         return float(value or 0.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _walk_values(payload: Any):
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            yield str(key), value
+            yield from _walk_values(value)
+    elif isinstance(payload, list):
+        for item in payload:
+            yield from _walk_values(item)
+
+
+def _first_numeric(payload: dict[str, Any], names: tuple[str, ...]) -> float | None:
+    name_set = {name.lower() for name in names}
+    for key, value in _walk_values(payload):
+        if key.lower() not in name_set or isinstance(value, bool):
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _first_bool(payload: dict[str, Any], names: tuple[str, ...]) -> bool | None:
+    name_set = {name.lower() for name in names}
+    for key, value in _walk_values(payload):
+        if key.lower() not in name_set:
+            continue
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"true", "1", "yes", "on", "enabled"}:
+                return True
+            if lowered in {"false", "0", "no", "off", "disabled"}:
+                return False
+    return None
+
+
+def _first_text(payload: dict[str, Any], names: tuple[str, ...]) -> str | None:
+    name_set = {name.lower() for name in names}
+    for key, value in _walk_values(payload):
+        if key.lower() in name_set and value not in (None, ""):
+            return str(value)
+    return None
 
 
 def _start_date_to_epoch(start_date: str, *, fallback_end_time: int, fallback_days: int) -> int:

@@ -7,7 +7,9 @@ from src.billing import (
     OpenAIBillingSnapshot,
     calculate_provider_billed_spend,
     calculate_tavily_billing,
+    fetch_tavily_usage_snapshot,
     fetch_openai_billing_snapshot,
+    parse_tavily_usage_response,
     parse_openai_completions_usage_response,
     parse_openai_costs_response,
 )
@@ -80,6 +82,47 @@ def test_openai_cost_parser_sums_amount_values_and_currency() -> None:
     assert summary.amount_by_currency == {"usd": pytest.approx(0.25)}
     assert summary.result_count == 3
     assert summary.project_ids == ("proj_a", "proj_b")
+
+
+def test_tavily_usage_parser_prefers_live_credit_fields() -> None:
+    fallback = calculate_tavily_billing(credits_used=878, included_monthly_credits=1000)
+
+    summary = parse_tavily_usage_response(
+        {
+            "account": {
+                "plan_name": "Researcher",
+                "usage": {"credits_used": 962, "included_credits": 1000},
+                "billing": {"pay_as_you_go_enabled": True, "paygo_spend": 0},
+            }
+        },
+        fallback=fallback,
+    )
+
+    assert summary.credits_used == 962
+    assert summary.included_monthly_credits == 1000
+    assert summary.free_credits_remaining == 38
+    assert summary.actual_billed_usd == pytest.approx(0.0)
+    assert summary.pay_as_you_go_enabled is True
+
+
+def test_tavily_usage_fetch_falls_back_to_local_counts_without_key() -> None:
+    summary = fetch_tavily_usage_snapshot(api_key=None, fallback_credits_used=12, included_monthly_credits=1000)
+
+    assert summary.credits_used == 12
+    assert summary.is_live is False
+    assert "unavailable" in summary.source_label.lower()
+
+
+def test_tavily_usage_fetch_uses_live_usage_api() -> None:
+    session = MockSession([MockResponse({"credits_used": 962, "included_credits": 1000, "paygo_spend": 0})])
+
+    summary = fetch_tavily_usage_snapshot(api_key="tvly-test", fallback_credits_used=1, session=session, now=1_717_200_000)
+
+    assert summary.credits_used == 962
+    assert summary.source_label == "Live from Tavily usage API"
+    assert summary.is_live is True
+    assert summary.fetched_at_label == "2024-06-01T00:00:00Z"
+    assert session.calls[0]["url"] == billing.TAVILY_USAGE_URL
 
 
 def test_openai_usage_parser_extracts_token_model_project_key_and_requests() -> None:
