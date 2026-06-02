@@ -2895,14 +2895,15 @@ elif slide["key"] == "search":
                 st.rerun()
 
         if homepage_checked > 0 and projected_tavily_calls <= 0:
+            tavily_result_label = "Tavily account credits used" if tavily_billing.is_live else "Tavily calls recorded locally"
             _render_phase_panel(
                 "after",
                 "Web-search data is ready",
                 "Companies either had enough company-page data or now have Tavily web-search data.",
                 [
-                    ("Scored from company pages", _format_int(tavily_avoided)),
-                    ("Tavily Search API calls recorded", _format_int(run_totals.get("tavily_calls") or 0)),
                     ("Companies with source data", _format_int(metrics.get("enriched") or 0)),
+                    ("Scored from company pages", _format_int(tavily_avoided)),
+                    (tavily_result_label, _format_int(tavily_billing.credits_used)),
                 ],
             )
     else:
