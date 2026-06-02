@@ -2699,17 +2699,26 @@ elif slide["key"] == "homepage":
         prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
         pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode)
         pending_mode = pending_verify_run.get("mode", verify_mode)
+        homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
+        selected_batch_checked = min(homepage_checked, int(prospect_cap))
+        selected_batch_remaining = max(0, int(prospect_cap) - selected_batch_checked)
+        next_unchecked_available = int((pending_verify_run or {}).get("projected_homepage_candidates") or 0)
+        page_check_run_count = min(selected_batch_remaining, next_unchecked_available)
         _render_phase_panel(
             "before",
             "Choose the batch for page checks",
             "The page check reads homepage metadata first, so companies with enough page data can avoid a Tavily web-search call.",
             [
                 ("Selected batch", f"{_format_int(prospect_cap)} companies"),
-                ("Unchecked company pages in selected queue", _format_int((pending_verify_run or {}).get("projected_homepage_candidates") or 0)),
+                ("Already checked in selected batch", _format_int(selected_batch_checked)),
+                ("Remaining page checks in selected batch", _format_int(selected_batch_remaining)),
                 ("What happens", "Read homepage title, description, headings, and short text"),
             ],
         )
     else:
+        selected_batch_checked = 0
+        selected_batch_remaining = 0
+        page_check_run_count = 0
         _render_phase_panel(
             "before",
             "Company list is not ready yet",
@@ -2720,14 +2729,17 @@ elif slide["key"] == "homepage":
     homepage_scoreable = int(cascade_summary.get("score_from_homepage") or 0)
     homepage_needs_search = int(cascade_summary.get("needs_tavily") or 0)
     homepage_data_gaps = int(cascade_summary.get("data_gaps") or 0)
-    homepage_pending = int((pending_verify_run or {}).get("projected_homepage_candidates") or 0)
     if workflow_stage < 4:
         st.warning("Remove excluded rows before checking company pages.")
-    elif homepage_pending > 0 and st.button("Check company pages", type="primary", use_container_width=True, key="check_company_pages_inline"):
+    elif page_check_run_count > 0 and st.button("Check company pages", type="primary", use_container_width=True, key="check_company_pages_inline"):
         st.session_state["active_verify_mode"] = pending_mode
-        st.session_state["homepage_check_cap"] = int(prospect_cap)
+        st.session_state["homepage_check_cap"] = int(page_check_run_count)
         st.session_state["check_company_pages_requested"] = True
         st.rerun()
+    elif workflow_stage >= 4 and selected_batch_remaining <= 0:
+        st.info("The selected batch has already been checked. Choose a larger batch to check more company pages, or continue to Step 5.")
+    elif workflow_stage >= 4:
+        st.info("No unchecked company pages remain for the selected queue. Continue to Step 5.")
 
     if homepage_checked > 0:
         _render_phase_panel(
@@ -2735,9 +2747,10 @@ elif slide["key"] == "homepage":
             "Page-check routing is available",
             "The checked companies are now split between page-data scoring and web-search routing.",
             [
-                ("Company pages checked", _format_int(homepage_checked)),
-                ("Ready from page data", _format_int(homepage_scoreable)),
-                ("Need web search", _format_int(homepage_needs_search)),
+                ("Page checks completed in selected batch", _format_int(selected_batch_checked)),
+                ("All company pages checked so far", _format_int(homepage_checked)),
+                ("Ready from page data across checked pages", _format_int(homepage_scoreable)),
+                ("Need web search across checked pages", _format_int(homepage_needs_search)),
             ],
         )
     else:
