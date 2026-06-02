@@ -122,6 +122,25 @@ Before a verification run starts, the dashboard shows a confirmation step with p
 
 Provider calls use bounded retries with exponential backoff and jitter for transient errors such as 408, 409, 425, 429, and 5xx responses. When a provider includes `Retry-After`, the app uses it. `PROVIDER_MAX_RETRIES`, `PROVIDER_BACKOFF_INITIAL_SECONDS`, and `PROVIDER_BACKOFF_MAX_SECONDS` control that behavior. Non-retryable provider failures are recorded per company so a single bad row does not stop the full batch.
 
+## Source Funnel
+
+The app does not send all Manifest rows directly to paid APIs. It uses a staged funnel so cheap, deterministic work happens first and paid provider calls are reserved for rows where they are most likely to matter.
+
+The current live scrape produced this first-pass funnel:
+
+- 3,288 raw attendee rows from the Manifest page.
+- 3,239 unique companies after normalization and deduplication.
+- 2,444 broad candidates after excluding obvious non-targets.
+- 158 high-priority companies selected for the first paid enrichment queue.
+
+The 158-company queue is not the same thing as saying only 158 companies in the whole dataset could ever be interesting. It is a precision-first queue for the first API-backed pass. The broader 2,444-candidate universe remains in SQLite and can be enriched later with a larger budget, looser filters, richer data providers, or human-selected batches.
+
+The deterministic rules are intentionally simple and inspectable. They exclude categories that are unlikely to be venture prospects based on the attendee name alone: known large incumbents, investors, banks, associations, media organizations, universities, government entities, consultancies, agencies, legal firms, generic placeholders, retailers or brands without technology signals, and logistics service providers without software, platform, automation, AI, analytics, TMS, WMS, or similar product signals.
+
+Rows with clear technology or Wittington-relevant signals become high priority. Examples of high-priority signals include `AI`, `.ai`, robotics, software, SaaS, platform, automation, analytics, visibility, autonomous systems, optimization, TMS, WMS, machine learning, computer vision, warehouse automation, retail infrastructure, healthcare operations, climate, sustainability, carbon, and emissions.
+
+This is why the demo can be very cost-effective. The app avoids paying Tavily and OpenAI to inspect obvious non-prospects, starts with the rows most likely to contain technology companies, reuses cached provider results, and uses compact prompts with a low-cost OpenAI model. This is a cost-control architecture, not an assertion that the first pass has perfect recall.
+
 ## Billing And Usage Tracking
 
 The **API usage and cost** section separates provider-billed spend from internal estimates:
@@ -147,6 +166,8 @@ Provider-billed OpenAI cost for the configured `OPENAI_BILLING_PROJECT_ID` is th
 `TAVILY_COST_PER_CALL_USD` remains supported as an internal shadow estimate for projections. It is not included in actual provider-billed spend unless Tavily pay-as-you-go is explicitly enabled, in which case overage credits beyond `TAVILY_INCLUDED_MONTHLY_CREDITS` are billed using `TAVILY_PAYG_PRICE_PER_CREDIT_USD`.
 
 For the current demo configuration, Tavily pay-as-you-go should remain disabled unless Wittington explicitly wants automated overage billing. With pay-as-you-go disabled, the app can still report credits consumed and remaining included credits while keeping Tavily billed spend at `$0.00`.
+
+In the current hosted demo, the visible cost can round to `$0.00` for three separate reasons. First, Tavily pay-as-you-go is disabled, so included Researcher-plan credits are tracked as consumed credits rather than billed spend. Second, the OpenAI scoring work uses `gpt-4o-mini` with compact prompts, so observed local token-rate estimates can be less than one cent for small scored batches. Third, live OpenAI billing can be delayed, cached, or rounded in platform reporting. The dashboard therefore shows both live provider billing and the internal token-rate estimate instead of treating either view as a substitute for the other.
 
 ## Performance And Cost Controls
 
@@ -215,6 +236,7 @@ Create a Streamlit Cloud app from this repository, set `app.py` as the entrypoin
 - The seed attendee file is included for reliability, but the live scrape should be rerun before a demo.
 - Funding stage is inferred from public snippets unless a richer company-data API is added.
 - OpenAI scoring depends on retrieved evidence quality, so thin evidence is marked low confidence.
+- The high-priority queue is optimized for precision and cost control, not exhaustive recall. Stealth companies or companies with generic names may need a broader enrichment pass.
 - Long provider runs are synchronous in the current Streamlit app; a background worker architecture would be needed for true pause/resume/cancel across sessions.
 
 ## Related Notes

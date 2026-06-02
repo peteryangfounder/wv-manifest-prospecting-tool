@@ -12,6 +12,18 @@ The deterministic rules layer in `src/rules.py` runs before any paid provider ca
 
 The rules layer also creates a high-priority enrichment queue. That queue helps the app spend its first Tavily and OpenAI calls on companies most likely to produce useful venture prospects instead of processing the entire source universe in arbitrary list order.
 
+## Funnel Math
+
+The first-pass funnel is deliberately cost-aware. On the current live Manifest scrape, the app retrieved 3,288 raw attendee rows and normalized them to 3,239 unique companies. The deterministic rules marked 2,444 as broad candidates and 158 as high-priority paid-enrichment rows.
+
+That distinction is important. The app does not claim that only 158 companies are possible prospects. It claims that 158 rows have enough explicit technology or Wittington-relevant signal in the attendee name to justify being first in line for paid API enrichment. The rest of the broad candidate universe remains stored, visible, and available for later enrichment. This keeps the demo inexpensive while preserving optionality.
+
+The broad candidate count is high because the rules are conservative about exclusion. If a row is ambiguous and cannot be confidently identified as a non-target, it remains a candidate. The high-priority count is lower because that queue requires stronger positive signals such as `AI`, `.ai`, robotics, software, SaaS, platform, automation, analytics, visibility, autonomous systems, optimization, TMS, WMS, machine learning, computer vision, warehouse automation, retail infrastructure, healthcare operations, climate, sustainability, carbon, or emissions.
+
+The cheap first pass uses deterministic string matching, curated keyword groups, normalized names, and explicit exclusion lists. It does not use an LLM and it does not perform hidden reasoning. That is a feature: the rules are transparent, fast, testable, and easy to challenge in a review meeting. If a partner disagrees with a rule, the rule can be changed and the full source universe can be rescored without re-running paid provider calls.
+
+The risk is recall. A stealth startup with a generic name and no obvious technology signal may not enter the first paid queue. The mitigation is that it is not deleted. It remains in the source list and broad candidate set, with a baseline score and deterministic tags. A production version should add additional cheap recall layers, such as website-domain lookup, embeddings, company database enrichment, partner-selected batches, and first-party CRM signals, before deciding which lower-priority rows deserve paid research.
+
 ## Enrichment And Scoring
 
 Tavily is used for public search evidence. The app stores compacted titles, URLs, snippets, website hints, raw JSON, and provider status in SQLite. OpenAI receives the compact evidence and returns structured JSON with company type, startup signal, sector tags, Wittington edge, score components, confidence, rationale, and evidence summary.
@@ -54,6 +66,10 @@ Before a verification run starts, the dashboard shows a confirmation step with p
 
 The recommended current Tavily setting is pay-as-you-go disabled. That keeps the demo cost-controlled and avoids automated overage billing. Pay-as-you-go should only be enabled if Wittington explicitly wants larger uncached runs to continue beyond included credits.
 
+The near-zero current cost is explainable rather than mysterious. The app avoids paid calls on obvious non-prospects, begins with a 158-row high-priority queue instead of the full 3,239-company universe, reuses cached provider results, keeps Tavily within included plan credits, and uses compact OpenAI prompts with `gpt-4o-mini`. The dashboard can show `$0.00` live provider billing while the internal OpenAI token-rate estimate shows a fraction of a cent or a few cents because platform billing can round, cache, or lag behind local token accounting.
+
+The right explanation to Wittington is not that the app made 3,000 nuanced investment decisions for free. The accurate explanation is that it performed a transparent, deterministic triage for free, then spent API calls only on the highest-signal rows. That is exactly the point of the architecture: use code for the cheap mechanical narrowing, use search and AI where judgment and evidence synthesis are actually valuable, and keep the full source universe available when more recall is needed.
+
 ## Interface Decisions
 
 The Streamlit interface is organized around the work an investor or associate needs to do: prepare the source list, verify a selected batch, then review ranked results. The Overview tab shows source coverage, prospect status, charts, and API usage. The Source list keeps cleaned source rows visible. The Verified prospects tab presents ranked companies with company descriptions, sector tags, score components, confidence, rationale, and evidence. The Company detail tab supports deeper review of one company at a time.
@@ -69,6 +85,8 @@ The app currently uses Streamlit and SQLite because they are simple, portable, a
 The app prioritizes caching and rule screening before paid APIs. This keeps costs low but means that companies with thin public signals may need manual review or richer data providers. The scoring model is evidence-bound by design: weak evidence lowers confidence rather than allowing the model to invent diligence signals.
 
 The current provider architecture is optimized for network-bound I/O. It should scale materially better than serial processing for thousands of rows, but the correct concurrency settings still depend on provider rate limits, account tier, and acceptable spend. The app therefore exposes worker counts, estimated cost, and estimated runtime before execution instead of hiding those operational choices.
+
+The biggest technical tradeoff is precision versus recall in the first API-backed pass. The current default is precision-first because the assignment asked for a useful ranked prospect list and because paid search/model calls should not be wasted on obvious non-prospects. For a production fund workflow, the next step would be configurable recall modes: a low-cost first pass, a broader partner-reviewed pass, and a full-universe pass with explicit spend approval.
 
 ## Validation
 

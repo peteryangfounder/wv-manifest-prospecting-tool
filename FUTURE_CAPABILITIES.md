@@ -10,6 +10,8 @@ The data model should treat Manifest as one source adapter. Additional adapters 
 
 For arbitrary datasets, the app should support column mapping. A user should be able to map source columns such as company name, website, country, category, description, employee count, funding stage, source URL, contact name, email, and notes. When a row already includes useful first-party or third-party fields, the pipeline should use them instead of paying to rediscover the same facts.
 
+The source funnel should become configurable by campaign. The current Manifest demo uses a precision-first high-priority queue so obvious technology companies are enriched first and costs stay low. A production version should let a user choose between precision-first, balanced, and recall-first modes. Precision-first would enrich only high-signal rows. Balanced mode would sample ambiguous rows and include partner-selected companies. Recall-first would enrich the broader candidate universe after an explicit cost approval step.
+
 ## First-Party Wittington Data
 
 Wittington’s own data would improve ranking quality more than more public search alone. CRM records can show prior contact, ownership, status, pass reasons, round timing, thesis association, partner interest, and relationship history. Meeting notes can capture founder quality, buyer pain, implementation risk, customer references, pricing concerns, technical credibility, and partner reactions.
@@ -34,6 +36,8 @@ A future entity model should include canonical company, aliases, domains, people
 
 The app should also detect stale or conflicting data. If one source says a company is Seed stage and another says Series B, the detail view should show the conflict, the source dates, and the confidence level. Score changes should explain which evidence changed and why the rank moved.
 
+The recall problem should be measured directly. The system should track how many rows were excluded, how many remained broad candidates, how many entered the high-priority queue, and how many later became strong prospects after deeper enrichment. Periodic audits should sample excluded and low-priority rows to estimate false negatives. That would turn the current deterministic funnel into a continuously calibrated sourcing system rather than a fixed keyword screen.
+
 ## Enrichment Providers
 
 External integrations should be selected based on whether they improve ranking quality, confidence, or diligence usefulness. Crunchbase or PitchBook could improve funding-stage detection, financing history, investor quality, and venture-backability assessment. People Data Labs, LinkedIn-style headcount data, Clearbit-style enrichment, and website crawling could improve team, location, category, growth, customer-segment, and product-depth signals.
@@ -49,6 +53,8 @@ The current implementation parallelizes network-bound Tavily and OpenAI calls an
 The production job system should support pause, resume, cancel, retry failed rows, schedule overnight runs, run only uncached rows, cap spend per job, cap spend per source, and stop automatically when provider cost exceeds a configured threshold. It should also support adaptive concurrency: raising or lowering worker counts based on 429 frequency, provider latency, error rate, remaining budget, and account-tier limits.
 
 For very large campaigns, the system should evaluate whether OpenAI Batch API, embeddings, structured extraction batches, or cheaper model tiers can reduce cost. The right approach may vary by step. Lightweight screening can use deterministic rules, embeddings, or smaller models. High-conviction candidates can receive richer synthesis from stronger models. This preserves quality where it matters without spending heavily on low-priority rows.
+
+Future cheap-recall layers could include website-domain discovery, homepage metadata extraction, embeddings over company names and descriptions, low-cost classifier models, company database lookups, and stratified sampling of ambiguous rows. These layers would reduce the chance that a promising company with a generic name is missed by the first deterministic pass.
 
 ## Cost Governance
 
