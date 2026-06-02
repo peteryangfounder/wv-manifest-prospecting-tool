@@ -83,6 +83,7 @@ class Settings:
     provider_backoff_initial_seconds: float = 1.0
     provider_backoff_max_seconds: float = 20.0
     homepage_evidence_max_per_run: int = 100
+    homepage_preview_max_per_click: int = 3
     homepage_fetch_timeout_seconds: float = 4.0
     homepage_fetch_max_bytes: int = 200_000
     tavily_plan_name: str = "Researcher"
@@ -94,6 +95,7 @@ class Settings:
     openai_billing_start_date: str = "2026-05-31"
     openai_billing_lookback_days: int = 30
     openai_billing_cache_ttl_seconds: int = 300
+    demo_safe_mode_default: bool = True
 
 
 def get_settings() -> Settings:
@@ -113,6 +115,7 @@ def get_settings() -> Settings:
         provider_backoff_initial_seconds=_env_float("PROVIDER_BACKOFF_INITIAL_SECONDS", 1.0),
         provider_backoff_max_seconds=_env_float("PROVIDER_BACKOFF_MAX_SECONDS", 20.0),
         homepage_evidence_max_per_run=_env_int("HOMEPAGE_EVIDENCE_MAX_PER_RUN", 100),
+        homepage_preview_max_per_click=_env_int("HOMEPAGE_PREVIEW_MAX_PER_CLICK", 3),
         homepage_fetch_timeout_seconds=_env_float("HOMEPAGE_FETCH_TIMEOUT_SECONDS", 4.0),
         homepage_fetch_max_bytes=_env_int("HOMEPAGE_FETCH_MAX_BYTES", 200_000),
         tavily_max_results=_env_int("TAVILY_MAX_RESULTS", 3),
@@ -128,4 +131,5 @@ def get_settings() -> Settings:
         openai_billing_start_date=os.getenv("OPENAI_BILLING_START_DATE", "2026-05-31"),
         openai_billing_lookback_days=_env_int("OPENAI_BILLING_LOOKBACK_DAYS", 30),
         openai_billing_cache_ttl_seconds=_env_int("OPENAI_BILLING_CACHE_TTL_SECONDS", 300),
+        demo_safe_mode_default=_env_bool("DEMO_SAFE_MODE_DEFAULT", True),
     )

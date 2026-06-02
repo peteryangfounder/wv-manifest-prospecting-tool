@@ -86,10 +86,12 @@ Use the dashboard in this order:
 
 1. Click **1. Load and screen source data**.
 2. Choose the number of companies to verify, verification mode, and OpenAI model.
-3. Click **2. Verify prospects with APIs**.
-4. Review the projected Tavily calls, OpenAI calls, token-rate estimate, Tavily billed cost, total estimated provider cost, worker counts, and estimated runtime.
-5. Click **Confirm and start API run** if the estimate is acceptable.
-6. Review the Overview, Source list, Verified prospects, and Company detail tabs.
+3. Leave **Demo safe mode** on for an interview walkthrough. Safe mode keeps homepage evidence preview available and disables the paid Tavily/OpenAI run button.
+4. Click **2. Review evidence and cost estimate**.
+5. Review the Evidence Cascade Summary, search calls avoided, route examples, projected search calls, AI scoring calls, provider cost estimate, and runtime.
+6. Click **Preview homepage evidence sample** to populate a fast no-paid evidence cascade sample.
+7. Turn off **Demo safe mode** only if you intentionally want to start a paid provider run, then click **Start paid API run**.
+8. Review the Overview, Source list, Verified prospects, and Company detail tabs.
 
 For a command-line run:
 
@@ -178,6 +180,8 @@ The current implementation includes the first bounded version of that cascade. I
 The tool does not ask AI to judge raw company names. It first uses deterministic rules only to remove obvious non-prospects and order the queue. It then attempts cheap homepage/domain evidence for API-eligible companies. If homepage evidence is strong enough, Tavily search is skipped and the company can move directly to OpenAI scoring with a compact evidence packet. If homepage evidence is missing, unclear, blocked, contradictory, or unresolved, the row escalates to Tavily rather than being hard-excluded.
 
 OpenAI scores compact evidence packets, not names. The packet includes external snippets, source URLs, homepage route decisions, route reasons, positive and negative signals, domain confidence, and data-gap context when available. The UI exposes those same route decisions, evidence snippets, evidence source labels, confidence values, and false-negative audit samples so an investor can inspect why a company was routed or ranked.
+
+Demo narrative: the app does not make investment judgments from names alone. It gathers cheap homepage evidence first, escalates to search only when evidence is missing or unclear, and sends OpenAI compact evidence packets rather than raw company names. The interface shows confidence, snippets, route reasons, search calls avoided, and false-negative audit samples so the workflow is inspectable.
 
 ## Billing And Usage Tracking
 

@@ -1704,6 +1704,13 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.caption(f"SQLite: `{display_database_path}`")
+    demo_safe_mode = st.checkbox(
+        "Demo safe mode",
+        value=bool(st.session_state.get("demo_safe_mode", _setting(settings, "demo_safe_mode_default", True))),
+        key="demo_safe_mode",
+        help="When on, the homepage evidence preview still works, but the paid Tavily/OpenAI run button is disabled.",
+    )
+    st.caption("Safe mode blocks paid search and OpenAI scoring unless you turn it off.")
 
     source_rows_shown = st.number_input(
         "Source cards shown",
@@ -1771,9 +1778,9 @@ if workflow_stage == 1:
         unsafe_allow_html=True,
     )
 elif workflow_stage == 2:
-    st.markdown("<div class='guided-title'>Step 2: Verify prospects with APIs</div>", unsafe_allow_html=True)
+    st.markdown("<div class='guided-title'>Step 2: Review evidence cascade</div>", unsafe_allow_html=True)
     st.markdown(
-        "<div class='guided-copy'>Next, choose the batch size and model, then run search enrichment and OpenAI scoring for the next ranked candidates.</div>",
+        "<div class='guided-copy'>Next, preview homepage evidence, review estimated search and AI usage, then start a paid run only if needed.</div>",
         unsafe_allow_html=True,
     )
 else:
@@ -1837,9 +1844,9 @@ if workflow_stage >= 2:
 if workflow_stage == 1:
     primary_label = "1. Load and screen source data"
 elif workflow_stage == 2:
-    primary_label = "2. Verify prospects with APIs"
+    primary_label = "2. Review evidence and cost estimate"
 else:
-    primary_label = "Verify another batch"
+    primary_label = "Review another evidence run"
 
 if st.button(primary_label, type="primary", use_container_width=True):
     if workflow_stage == 1:
@@ -1878,8 +1885,8 @@ if pending_verify_run and run_step != "source":
             "Candidate universe",
             f"{_format_int(broad_universe_pending)} API-eligible of {_format_int(unique_universe_pending)} unique",
         ),
-        ("Uncached Tavily calls", _format_int(pending_verify_run["projected_tavily_calls"])),
-        ("Projected OpenAI scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
+        ("Search calls to run", _format_int(pending_verify_run["projected_tavily_calls"])),
+        ("AI scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
         (
             "Candidate mix",
             (
@@ -1890,19 +1897,19 @@ if pending_verify_run and run_step != "source":
         ),
         ("Projected input tokens", _format_int(pending_verify_run["projected_prompt_tokens"])),
         ("Projected output tokens", _format_int(pending_verify_run["projected_completion_tokens"])),
-        ("Estimated OpenAI token-rate cost", _format_currency(pending_verify_run["projected_openai_estimate"])),
-        ("Estimated Tavily billed cost", _format_currency(pending_verify_run["projected_tavily_bill"])),
+        ("Estimated AI scoring cost", _format_currency(pending_verify_run["projected_openai_estimate"])),
+        ("Estimated search cost", _format_currency(pending_verify_run["projected_tavily_bill"])),
     ]
     if projected_tavily_overage > 0 and not tavily_payg_enabled_pending:
         projected_rows.append(
             (
-                "Tavily over included credits",
+                "Search credits over included plan",
                 f"{_format_int(projected_tavily_overage)} credits; pay-as-you-go off",
             )
         )
         projected_rows.append(
             (
-                "Tavily overage if enabled",
+                "Search overage if enabled",
                 _format_currency(float(pending_verify_run.get("projected_tavily_payg_if_enabled") or 0.0)),
             )
         )
@@ -1915,51 +1922,57 @@ if pending_verify_run and run_step != "source":
                 f"{pending_verify_run['tavily_workers']} search, {pending_verify_run['openai_workers']} scoring",
             ),
             (
-                "Tavily credits after run",
+                "Search credits after run",
                 f"{_format_int(pending_verify_run['tavily_credits_after'])} used, {_format_int(pending_verify_run['tavily_free_credits_remaining_after'])} included credits remaining",
             ),
-            ("Tavily pay-as-you-go", "on" if tavily_payg_enabled_pending else "off"),
+            ("Search pay-as-you-go", "on" if tavily_payg_enabled_pending else "off"),
         ]
     )
-    st.markdown("<div class='section-label'>Confirm API run</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-label'>Confirm paid run</div>", unsafe_allow_html=True)
     _render_summary_card(
         "Projected usage before starting",
         projected_rows,
     )
     cascade_rows = [
         ("API-eligible companies", _format_int(pending_verify_run.get("api_eligible_companies") or broad_universe_pending)),
-        ("Homepage/domain attempted", _format_int(pending_verify_run.get("homepage_attempted") or 0)),
+        ("Homepage evidence attempted", _format_int(pending_verify_run.get("homepage_attempted") or 0)),
         ("Domain discovery candidates for next run", _format_int(pending_verify_run.get("projected_homepage_candidates") or 0)),
         ("Accepted domains", _format_int(pending_verify_run.get("accepted_domains") or 0)),
         ("Provisional domains", _format_int(pending_verify_run.get("provisional_domains") or 0)),
         ("Unresolved domains", _format_int(pending_verify_run.get("unresolved_domains") or 0)),
         ("Homepage-positive companies", _format_int(pending_verify_run.get("cached_homepage_ready") or 0)),
-        ("Homepage-negative or soft-excluded", _format_int(pending_verify_run.get("cached_homepage_soft_excluded") or 0)),
-        ("Unclear or data-gap companies", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
-        ("Tavily skipped by homepage evidence", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
-        ("Tavily required by missing or unclear evidence", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
+        ("Soft-excluded", _format_int(pending_verify_run.get("cached_homepage_soft_excluded") or 0)),
+        ("Data gaps", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
+        ("Search calls avoided", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
+        ("Needs search", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
         ("Estimated paid calls avoided", _format_int(pending_verify_run.get("tavily_call_avoided_by_homepage_evidence") or 0)),
-        ("Estimated Tavily credits saved", _format_int(pending_verify_run.get("estimated_tavily_credits_saved") or 0)),
-        ("Estimated Tavily cost saved", _format_currency(pending_verify_run.get("estimated_tavily_cost_saved") or 0)),
+        ("Estimated search credits saved", _format_int(pending_verify_run.get("estimated_tavily_credits_saved") or 0)),
+        ("Estimated search cost saved", _format_currency(pending_verify_run.get("estimated_tavily_cost_saved") or 0)),
     ]
     _render_summary_card("Evidence Cascade Summary", cascade_rows)
     st.markdown(
-        "<div class='quiet-note'>Homepage/domain preview uses ordinary web requests only. It does not call Tavily or OpenAI.</div>",
+        "<div class='quiet-note'>Homepage evidence preview checks a small sample for the demo. It uses ordinary web requests only and does not call Tavily or OpenAI.</div>",
         unsafe_allow_html=True,
     )
-    if st.button("Run homepage evidence preview only", use_container_width=True):
+    if st.button("Preview homepage evidence sample", use_container_width=True):
         with st.spinner("Collecting bounded homepage/domain evidence without paid provider calls..."):
             run_deterministic_classification(conn)
+            preview_cap = max(1, min(int(pending_verify_run["cap"]), _setting_int(runtime_settings, "homepage_preview_max_per_click", 3)))
+            preview_settings = replace(
+                runtime_settings,
+                homepage_evidence_max_per_run=preview_cap,
+                homepage_fetch_timeout_seconds=min(float(_setting(runtime_settings, "homepage_fetch_timeout_seconds", 4.0) or 4.0), 1.0),
+            )
             preview_result = collect_homepage_evidence(
                 conn,
-                runtime_settings,
-                int(pending_verify_run["cap"]),
+                preview_settings,
+                preview_cap,
                 False,
                 mode=pending_mode,
             )
         st.session_state["last_action"] = {
             "message": (
-                f"Homepage preview checked {_format_int(preview_result.counts.get('processed'))} companies. "
+                f"Homepage preview checked {_format_int(preview_result.counts.get('processed'))} sample companies. "
                 "No Tavily or OpenAI calls were made."
             ),
             "level": "success",
@@ -1968,10 +1981,10 @@ if pending_verify_run and run_step != "source":
             conn, db.metrics(conn), runtime_settings, int(pending_verify_run["cap"]), pending_mode
         )
         st.rerun()
-    route_tabs = st.tabs(["Homepage-positive", "Needs Tavily", "Data gaps", "Soft-exclude", "Unresolved domain"])
+    route_tabs = st.tabs(["Homepage-positive", "Needs search", "Data gaps", "Soft-exclude", "Unresolved domain"])
     route_tab_specs = [
         ("score_from_homepage", "Homepage-positive examples"),
-        ("needs_tavily", "Needs-Tavily examples"),
+        ("needs_tavily", "Needs-search examples"),
         ("low_priority_data_gap", "Data-gap examples"),
         ("soft_exclude", "Soft-exclude examples"),
         (None, "Unresolved-domain examples"),
@@ -1992,8 +2005,10 @@ if pending_verify_run and run_step != "source":
         "OpenAI cost is an internal token-rate estimate based on the selected model and recent usage. "
         "Actual OpenAI billing may differ. No Tavily or OpenAI provider calls start until you confirm."
     )
+    if demo_safe_mode:
+        st.info("Demo safe mode is on. Homepage evidence preview is available, but paid Tavily/OpenAI runs are disabled.")
     confirm_cols = st.columns((1, 1))
-    if confirm_cols[0].button("Confirm and start API run", type="primary", use_container_width=True):
+    if confirm_cols[0].button("Start paid API run", type="primary", use_container_width=True, disabled=demo_safe_mode):
         st.session_state["active_verify_mode"] = pending_mode
         run_step = "verify"
         st.session_state.pop("pending_verify_run", None)
@@ -2176,24 +2191,24 @@ else:
             "Evidence Cascade Summary",
             [
                 ("API-eligible companies", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
-                ("Homepage/domain attempted", _format_int(cascade_summary.get("homepage_attempted") or 0)),
+                ("Homepage evidence attempted", _format_int(cascade_summary.get("homepage_attempted") or 0)),
                 ("Accepted domains", _format_int(cascade_summary.get("accepted_domains") or 0)),
                 ("Provisional domains", _format_int(cascade_summary.get("provisional_domains") or 0)),
                 ("Unresolved domains", _format_int(cascade_summary.get("unresolved_domains") or 0)),
                 ("Homepage-positive companies", _format_int(cascade_summary.get("score_from_homepage") or 0)),
-                ("Homepage-negative or soft-excluded", _format_int(cascade_summary.get("soft_excluded") or 0)),
-                ("Unclear or data-gap companies", _format_int(cascade_summary.get("data_gaps") or 0)),
+                ("Soft-excluded", _format_int(cascade_summary.get("soft_excluded") or 0)),
+                ("Data gaps", _format_int(cascade_summary.get("data_gaps") or 0)),
             ],
         )
     with cascade_cols[1]:
         _render_summary_card(
             "Paid Calls Avoided",
             [
-                ("Tavily skipped by homepage evidence", _format_int(tavily_avoided)),
-                ("Tavily required by missing or unclear evidence", _format_int(cascade_summary.get("needs_tavily") or 0)),
+                ("Search calls avoided", _format_int(tavily_avoided)),
+                ("Needs search", _format_int(cascade_summary.get("needs_tavily") or 0)),
                 ("Estimated paid calls avoided", _format_int(tavily_avoided)),
-                ("Estimated Tavily credits saved", _format_int(tavily_avoided)),
-                ("Estimated Tavily cost saved", _format_currency(tavily_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0))),
+                ("Estimated search credits saved", _format_int(tavily_avoided)),
+                ("Estimated search cost saved", _format_currency(tavily_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0))),
             ],
         )
 
@@ -2237,7 +2252,7 @@ else:
             )
         with route_cols[1]:
             _render_route_examples(
-                "Needs Tavily",
+                "Needs search",
                 db.homepage_route_examples(conn, route="needs_tavily", limit=3),
             )
             _render_route_examples(

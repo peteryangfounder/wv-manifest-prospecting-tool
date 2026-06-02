@@ -118,6 +118,8 @@ Ranked prospect cards and company detail views now show whether the supporting e
 
 The app also includes a lightweight false-negative audit sample. It surfaces soft-excluded rows, low-priority data gaps, unresolved domains, and ambiguous companies not yet selected by the current cap. This is not production-grade validation, but it shows the right operating discipline: uncertain or rejected rows should be sampled so the fund can estimate what the funnel might be missing.
 
+For the live demo, the app has a default-on demo safe mode. Safe mode keeps the homepage evidence preview available but disables the paid Tavily/OpenAI run button. The intended narrative is simple: the tool does not judge raw company names; it gathers cheap homepage evidence first; it escalates to search only when evidence is missing or unclear; OpenAI scores evidence packets rather than names; and the UI exposes confidence, snippets, route reasons, search calls avoided, and audit samples.
+
 ## Validation
 
 The repository includes pytest coverage for cleaning, deterministic rules, database migrations, cache reuse, priority queues, homepage evidence extraction and routing, homepage-route summaries, paid-call avoidance counts, route example generation, audit sample generation, ranked-result evidence source selection, OpenAI payload evidence fields, verified prospect view models, billing parsing and pagination, billing cache behavior, Tavily billing math, and concurrent enrichment/scoring persistence. The latest full test run passed with 49 tests.
