@@ -146,18 +146,35 @@ VERIFY_MODE_PRESETS = {
 
 CUSTOM_CSS = """
 <style>
+  :root {
+    --wv-ink: #1f2433;
+    --wv-muted: #667085;
+    --wv-line: #dfe4ec;
+    --wv-soft: #f6f8fb;
+    --wv-accent: #1f6f5b;
+    --wv-accent-soft: #eaf5f1;
+  }
+  #MainMenu,
+  footer,
+  header {
+    visibility: hidden;
+  }
+  .stApp {
+    background:
+      linear-gradient(180deg, #f7f9fb 0%, #ffffff 38%, #ffffff 100%);
+  }
   .block-container {
-    max-width: 1240px;
-    padding-top: 1rem;
-    padding-bottom: 2.5rem;
+    max-width: 1120px;
+    padding-top: 1.5rem;
+    padding-bottom: 2rem;
   }
   h1, h2, h3 {
     letter-spacing: 0 !important;
   }
   .wv-header {
-    border-bottom: 1px solid #eceff3;
-    margin-bottom: 0.9rem;
-    padding: 0.35rem 0 1rem 0;
+    border-bottom: 1px solid var(--wv-line);
+    margin-bottom: 0.85rem;
+    padding: 0.2rem 0 0.8rem 0;
   }
   .wv-eyebrow {
     color: #5d6675;
@@ -170,8 +187,8 @@ CUSTOM_CSS = """
     white-space: normal;
   }
   .wv-title {
-    color: #202332;
-    font-size: clamp(2rem, 4.4vw, 3.05rem);
+    color: var(--wv-ink);
+    font-size: clamp(1.7rem, 3vw, 2.35rem);
     font-weight: 780;
     line-height: 1.08;
     margin: 0;
@@ -179,10 +196,10 @@ CUSTOM_CSS = """
     white-space: normal;
   }
   .wv-subtitle {
-    color: #697386;
-    font-size: 0.95rem;
-    margin: 0.6rem 0 0 0;
-    max-width: 660px;
+    color: var(--wv-muted);
+    font-size: 0.92rem;
+    margin: 0.45rem 0 0 0;
+    max-width: 700px;
   }
   .guided-panel {
     background: #ffffff;
@@ -213,31 +230,57 @@ CUSTOM_CSS = """
   }
   .slide-shell {
     background: #ffffff;
-    border: 1px solid #dfe5ee;
-    border-radius: 10px;
-    margin: 0.8rem 0 1rem 0;
-    min-height: 470px;
-    padding: 1.1rem;
+    border: 1px solid var(--wv-line);
+    border-radius: 8px;
+    box-shadow: 0 14px 36px rgba(31, 36, 51, 0.06);
+    margin: 0.85rem 0 0.85rem 0;
+    padding: 1.1rem 1.15rem;
   }
   .slide-label {
-    color: #697386;
+    color: var(--wv-accent);
     font-size: 0.78rem;
     font-weight: 760;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
   }
   .slide-title {
-    color: #202332;
-    font-size: 1.55rem;
+    color: var(--wv-ink);
+    font-size: clamp(1.45rem, 2.5vw, 2.05rem);
     font-weight: 780;
-    line-height: 1.2;
-    margin-top: 0.18rem;
+    line-height: 1.16;
+    margin-top: 0.2rem;
   }
   .slide-copy {
-    color: #5d6675;
+    color: var(--wv-muted);
     font-size: 0.98rem;
     line-height: 1.45;
-    margin: 0.4rem 0 0.9rem 0;
-    max-width: 820px;
+    margin: 0.42rem 0 0 0;
+    max-width: 860px;
+  }
+  .slide-progress {
+    align-items: center;
+    display: grid;
+    gap: 0.6rem;
+    grid-template-columns: 1fr auto;
+    margin: 0.35rem 0 0.75rem 0;
+  }
+  .slide-progress-track {
+    background: #e7ebf0;
+    border-radius: 999px;
+    height: 0.45rem;
+    overflow: hidden;
+  }
+  .slide-progress-fill {
+    background: var(--wv-accent);
+    border-radius: inherit;
+    display: block;
+    height: 100%;
+  }
+  .slide-progress-text {
+    color: var(--wv-muted);
+    font-size: 0.82rem;
+    font-weight: 700;
+    white-space: nowrap;
   }
   .slide-progress-label {
     color: #697386;
@@ -247,8 +290,47 @@ CUSTOM_CSS = """
   }
   .slide-nav-note {
     color: #8b94a5;
-    font-size: 0.78rem;
+    font-size: 0.88rem;
+    font-weight: 700;
+    padding-top: 0.62rem;
     text-align: center;
+  }
+  .flow-grid {
+    display: grid;
+    gap: 0.6rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin: 0.85rem 0 0.2rem 0;
+  }
+  .flow-step {
+    background: #ffffff;
+    border: 1px solid var(--wv-line);
+    border-radius: 8px;
+    padding: 0.78rem;
+  }
+  .flow-number {
+    align-items: center;
+    background: var(--wv-accent-soft);
+    border-radius: 999px;
+    color: var(--wv-accent);
+    display: inline-flex;
+    font-size: 0.78rem;
+    font-weight: 800;
+    height: 1.45rem;
+    justify-content: center;
+    margin-bottom: 0.45rem;
+    width: 1.45rem;
+  }
+  .flow-title {
+    color: var(--wv-ink);
+    font-size: 0.94rem;
+    font-weight: 780;
+    line-height: 1.25;
+  }
+  .flow-copy {
+    color: var(--wv-muted);
+    font-size: 0.84rem;
+    line-height: 1.35;
+    margin-top: 0.22rem;
   }
   .next-step-card {
     background: #ffffff;
@@ -280,12 +362,13 @@ CUSTOM_CSS = """
     display: grid;
     gap: 0.65rem;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    margin: 0.75rem 0 1rem 0;
+    margin: 0.75rem 0 0.85rem 0;
   }
   .mini-metric {
     background: #ffffff;
-    border: 1px solid #e5e9ef;
+    border: 1px solid var(--wv-line);
     border-radius: 8px;
+    box-shadow: 0 8px 20px rgba(31, 36, 51, 0.035);
     padding: 0.75rem;
   }
   .mini-metric-label {
@@ -368,8 +451,9 @@ CUSTOM_CSS = """
   }
   .stButton > button[kind="primary"],
   .stButton > button[data-testid="baseButton-primary"] {
-    background: #202332 !important;
-    border-color: #202332 !important;
+    background: var(--wv-ink) !important;
+    border-color: var(--wv-ink) !important;
+    border-radius: 8px !important;
     color: #ffffff !important;
     font-weight: 760 !important;
   }
@@ -378,6 +462,10 @@ CUSTOM_CSS = """
     background: #111827 !important;
     border-color: #111827 !important;
     color: #ffffff !important;
+  }
+  .stButton > button {
+    border-radius: 8px !important;
+    min-height: 2.7rem;
   }
   .run-settings {
     background: #f8fafc;
@@ -394,10 +482,10 @@ CUSTOM_CSS = """
   }
   .cost-hero {
     background: #ffffff;
-    border: 1px solid #dfe5ee;
+    border: 1px solid var(--wv-line);
     border-radius: 8px;
-    margin: 1rem 0;
-    padding: 1.05rem;
+    margin: 0.8rem 0;
+    padding: 0.95rem;
   }
   .cost-hero-title {
     color: #202332;
@@ -457,9 +545,10 @@ CUSTOM_CSS = """
   }
   .summary-card {
     background: #ffffff;
-    border: 1px solid #e5e9ef;
+    border: 1px solid var(--wv-line);
     border-radius: 8px;
-    padding: 0.95rem;
+    margin-top: 0.75rem;
+    padding: 0.85rem 0.95rem;
   }
   .summary-title {
     color: #202332;
@@ -472,16 +561,16 @@ CUSTOM_CSS = """
     display: flex;
     justify-content: space-between;
     gap: 1rem;
-    padding: 0.24rem 0;
+    padding: 0.32rem 0;
   }
   .summary-label {
     color: #697386;
     font-size: 0.86rem;
   }
   .summary-value {
-    color: #202332;
-    font-size: 0.96rem;
-    font-weight: 760;
+    color: var(--wv-ink);
+    font-size: 0.94rem;
+    font-weight: 740;
     text-align: right;
   }
   .status-strip {
@@ -504,7 +593,7 @@ CUSTOM_CSS = """
     border-left-color: #d63d3d;
   }
   .section-label {
-    color: #202332;
+    color: var(--wv-ink);
     font-size: 1.05rem;
     font-weight: 740;
     margin: 0.3rem 0 0.6rem 0;
@@ -636,8 +725,8 @@ CUSTOM_CSS = """
     border-radius: 8px;
     display: grid;
     gap: 0.75rem;
-    grid-template-columns: minmax(12rem, 1.15fr) minmax(8rem, 0.75fr) minmax(14rem, 1.4fr);
-    padding: 0.9rem;
+    grid-template-columns: minmax(12rem, 1fr) minmax(8rem, 0.65fr) minmax(14rem, 1.25fr);
+    padding: 0.82rem;
   }
   .prospect-main {
     min-width: 0;
@@ -1125,6 +1214,44 @@ def _render_mini_metrics(items: list[tuple[str, str]]) -> None:
             "<div class='mini-metric'>"
             f"<div class='mini-metric-label'>{html.escape(_clean_ui_text(label))}</div>"
             f"<div class='mini-metric-value'>{html.escape(_clean_ui_text(value))}</div>"
+            "</div>"
+        )
+    body.append("</div>")
+    st.markdown("".join(body), unsafe_allow_html=True)
+
+
+def _render_slide_progress(index: int, total: int) -> None:
+    pct = ((index + 1) / max(1, total)) * 100
+    st.markdown(
+        "<div class='slide-progress'>"
+        "<div class='slide-progress-track'>"
+        f"<span class='slide-progress-fill' style='width:{pct:.1f}%'></span>"
+        "</div>"
+        f"<div class='slide-progress-text'>{index + 1} / {total}</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_slide_header(label: str, title: str, copy: str) -> None:
+    st.markdown(
+        "<div class='slide-shell'>"
+        f"<div class='slide-label'>{html.escape(_clean_ui_text(label))}</div>"
+        f"<div class='slide-title'>{html.escape(_clean_ui_text(title))}</div>"
+        f"<div class='slide-copy'>{html.escape(_clean_ui_text(copy))}</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_flow_steps(items: list[tuple[str, str]]) -> None:
+    body = ["<div class='flow-grid'>"]
+    for index, (title, copy) in enumerate(items, start=1):
+        body.append(
+            "<div class='flow-step'>"
+            f"<div class='flow-number'>{index}</div>"
+            f"<div class='flow-title'>{html.escape(_clean_ui_text(title))}</div>"
+            f"<div class='flow-copy'>{html.escape(_clean_ui_text(copy))}</div>"
             "</div>"
         )
     body.append("</div>")
@@ -2025,25 +2152,18 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-st.progress((slide_index + 1) / slide_count, text=f"{slide_index + 1} of {slide_count}: {slide['title']}")
-st.markdown(
-    "<div class='slide-shell'>"
-    f"<div class='slide-label'>{html.escape(slide['label'])}</div>"
-    f"<div class='slide-title'>{html.escape(slide['title'])}</div>"
-    f"<div class='slide-copy'>{html.escape(slide['copy'])}</div>",
-    unsafe_allow_html=True,
-)
+_render_slide_progress(slide_index, slide_count)
+_render_slide_header(slide["label"], slide["title"], slide["copy"])
 
 if slide["key"] == "overview":
-    _render_summary_card(
-        "Flow",
+    _render_flow_steps(
         [
-            ("1. Source", "Manifest companies are cleaned and deduplicated."),
-            ("2. Screen", "Obvious non-prospects are removed without paid APIs."),
-            ("3. Evidence", "Homepage metadata is checked before paid search."),
-            ("4. Search", "Tavily is used only when evidence is missing or unclear."),
-            ("5. Score", "OpenAI scores compact evidence packets, not raw names."),
-            ("6. Report", "Prospects and provider costs are shown separately."),
+            ("Source", "Manifest companies are cleaned and deduplicated."),
+            ("Screen", "Obvious non-prospects are removed without paid APIs."),
+            ("Evidence", "Homepage metadata is checked before paid search."),
+            ("Search", "Tavily runs only when evidence is missing or unclear."),
+            ("Score", "OpenAI scores compact evidence packets, not raw names."),
+            ("Report", "Prospects and provider costs are shown separately."),
         ],
     )
 elif slide["key"] == "source":
@@ -2173,7 +2293,6 @@ elif slide["key"] == "routing":
             ],
         )
 
-st.markdown("</div>", unsafe_allow_html=True)
 nav_cols = st.columns((1, 1, 1))
 if nav_cols[0].button("Previous", disabled=slide_index == 0, use_container_width=True):
     st.session_state["slide_index"] = max(0, slide_index - 1)
