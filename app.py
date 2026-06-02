@@ -2449,27 +2449,48 @@ if st.session_state.pop("check_company_pages_requested", False):
     frame, metrics = _load_frame_and_metrics(conn)
     st.rerun()
 
-if st.session_state.pop("start_paid_run_requested", False):
+if st.session_state.pop("start_web_search_requested", False):
     cap = int(prospect_cap)
     active_verify_mode = st.session_state.get("active_verify_mode", verify_mode)
-    run_started_at = time.perf_counter()
-    progress = st.progress(0, text=f"Preparing run 0/{cap:,} (0.0%) - ETA calculating")
-    preview = st.empty()
+    search_started_at = time.perf_counter()
+    progress = st.progress(0, text=f"Web search 0/{cap:,} (0.0%) - ETA calculating")
     classify_result = run_deterministic_classification(conn)
-    enrichment_started_at = time.perf_counter()
-    progress.progress(0.05, text="Web search 0/0 (0.0%) - ETA calculating")
 
     def enrichment_progress(index, total, result, counts):
         if total:
             progress.progress(
-                min(0.5, (index / total) * 0.5),
-                text=_progress_status("Web search", index, total, enrichment_started_at, _clean_ui_text(result.get("company_name", ""))),
+                min(1.0, index / total),
+                text=_progress_status("Web search", index, total, search_started_at, _clean_ui_text(result.get("company_name", ""))),
             )
+
+    enrich_result = enrich_candidates(
+        conn,
+        runtime_settings,
+        cap,
+        False,
+        progress_callback=enrichment_progress,
+        mode=active_verify_mode,
+    )
+    progress.progress(1.0, text=f"Web search complete - elapsed {_format_live_duration(time.perf_counter() - search_started_at)}")
+    st.session_state["last_action"] = {
+        "message": enrich_result.message,
+        "level": "warning" if enrich_result.counts.get("errors") else "success",
+    }
+    st.session_state.pop("active_verify_mode", None)
+    frame, metrics = _load_frame_and_metrics(conn)
+    st.rerun()
+
+if st.session_state.pop("start_scoring_requested", False):
+    cap = int(prospect_cap)
+    active_verify_mode = st.session_state.get("active_verify_mode", verify_mode)
+    scoring_started_at = time.perf_counter()
+    progress = st.progress(0, text=f"OpenAI scoring 0/{cap:,} (0.0%) - ETA calculating")
+    preview = st.empty()
 
     def scoring_progress(index, total, result, counts):
         if total:
             progress.progress(
-                min(1.0, 0.5 + (index / total) * 0.5),
+                min(1.0, index / total),
                 text=_progress_status("OpenAI scoring", index, total, scoring_started_at, _clean_ui_text(result.get("company_name", ""))),
             )
         if total and index < total and index % 5 != 0:
@@ -2485,15 +2506,6 @@ if st.session_state.pop("start_paid_run_requested", False):
             unsafe_allow_html=True,
         )
 
-    enrich_result = enrich_candidates(
-        conn,
-        runtime_settings,
-        cap,
-        False,
-        progress_callback=enrichment_progress,
-        mode=active_verify_mode,
-    )
-    scoring_started_at = time.perf_counter()
     score_result = score_enriched_candidates(
         conn,
         runtime_settings,
@@ -2502,16 +2514,14 @@ if st.session_state.pop("start_paid_run_requested", False):
         progress_callback=scoring_progress,
         mode=active_verify_mode,
     )
-    progress.progress(1.0, text=f"Search and scoring complete - elapsed {_format_live_duration(time.perf_counter() - run_started_at)}")
-    level = "warning" if enrich_result.counts.get("errors") or score_result.counts.get("errors") else "success"
+    progress.progress(1.0, text=f"OpenAI scoring complete - elapsed {_format_live_duration(time.perf_counter() - scoring_started_at)}")
+    level = "warning" if score_result.counts.get("errors") else "success"
     run_openai_estimate = float(score_result.counts.get("estimated_cost_usd") or 0)
-    run_tavily_credits = int(enrich_result.counts.get("tavily_credits_used") or enrich_result.counts.get("tavily_calls") or 0)
-    run_tavily_billed = float(enrich_result.counts.get("tavily_actual_billed_usd") or 0)
     st.session_state["last_action"] = {
         "message": (
-            f"Scored {score_result.counts.get('scored', 0):,} companies from a {cap:,}-company {VERIFY_MODE_PRESETS.get(active_verify_mode, VERIFY_MODE_PRESETS['balanced'])['label'].lower()} batch. "
-            f"OpenAI API token-cost estimate from local token counts: {_format_currency(run_openai_estimate)}. "
-            f"Tavily Search API credits used: {run_tavily_credits:,}; Tavily Search API billed cost: {_format_currency(run_tavily_billed)}."
+            f"Scored {score_result.counts.get('scored', 0):,} companies from a {cap:,}-company "
+            f"{VERIFY_MODE_PRESETS.get(active_verify_mode, VERIFY_MODE_PRESETS['balanced'])['label'].lower()} batch. "
+            f"OpenAI API token-cost estimate from local token counts: {_format_currency(run_openai_estimate)}."
         ),
         "level": level,
     }
@@ -2637,12 +2647,13 @@ if not cost_stage_table.empty:
     cost_stage_table["run_type_display"] = cost_stage_table["run_type"].apply(_humanize)
 
 slides = [
-    {"key": "overview", "label": "Overview", "title": "Manifest list to scored companies.", "copy": "Steps 1-5 each show the operation setup and the current result from running it. Steps 6-8 review cost, scored companies, and page-check details."},
+    {"key": "overview", "label": "Overview", "title": "Manifest list to scored companies.", "copy": "Steps 1-6 each show one operation and its result. Steps 7-9 review cost, scored companies, and page-check details."},
     {"key": "source", "label": "Step 1", "title": "Load the Manifest list.", "copy": "Import raw attendee-company rows from the public Manifest attendee list."},
     {"key": "normalize", "label": "Step 2", "title": "Normalize company names.", "copy": "Convert raw attendee-company text into one saved company name per normalized company."},
     {"key": "exclusions", "label": "Step 3", "title": "Remove excluded rows.", "copy": "Remove incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names."},
     {"key": "homepage", "label": "Step 4", "title": "Check company pages.", "copy": "Read domains, page titles, descriptions, headings, and short homepage text before web search."},
-    {"key": "estimate", "label": "Step 5", "title": "Run web search and scoring.", "copy": "Review the selected batch, expected web-search and scoring calls, and current scored-result counts before or after running the operation."},
+    {"key": "search", "label": "Step 5", "title": "Run web search.", "copy": "Use Tavily only for companies that did not have enough company-page data."},
+    {"key": "score", "label": "Step 6", "title": "Score companies.", "copy": "Score companies after company-page data and web-search data are ready."},
     {"key": "cost", "label": "Review", "title": "Review API cost detail.", "copy": "Inspect OpenAI API billing, Tavily Search API credits, and token-count estimates after the run."},
     {"key": "prospects", "label": "Review", "title": "Review scored companies.", "copy": "Inspect the companies scored from company-page data or web-search data."},
     {"key": "routing", "label": "Review", "title": "Review page-check details.", "copy": "Inspect which companies had enough page data and which companies needed web search."},
@@ -2688,7 +2699,8 @@ if slide["key"] == "overview":
             ("Company names", "Normalize company names and merge duplicate names."),
             ("Exclusions", "Remove incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names."),
             ("Company pages", "Choose the batch size, then read domains, titles, descriptions, and snippets."),
-            ("Search and score", "Run Tavily only when company-page data is incomplete, then score companies against Wittington criteria."),
+            ("Web search", "Run Tavily only for companies that need more data."),
+            ("Score", "Score companies using company-page data or Tavily web-search data."),
             ("Cost detail", "Review API calls, token estimates, and provider billing details."),
             ("Scored companies", "Review the ranked companies and the source data used for scoring."),
             ("Page-check details", "Review which companies used page data and which needed web search."),
@@ -2822,54 +2834,100 @@ elif slide["key"] == "homepage":
                 ("Need web search", _format_int(homepage_needs_search)),
             ],
         )
-elif slide["key"] == "estimate":
+elif slide["key"] == "search":
     if pending_verify_run:
         prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
+        pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode)
+        pending_mode = pending_verify_run.get("mode", verify_mode)
         homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
         _render_phase_panel(
             "before",
-            "Review the selected run before paid API work",
-            "This step estimates web-search calls, OpenAI scoring calls, runtime, tokens, and cost for the selected batch.",
+            "Web search setup",
+            "Only companies that still need more data are sent to Tavily.",
             [
                 ("Companies in this run", _format_int(pending_verify_run["cap"])),
-                ("Tavily Search API calls planned", _format_int(pending_verify_run["projected_tavily_calls"])),
-                ("OpenAI API scoring calls planned", _format_int(pending_verify_run["projected_openai_calls"])),
-                ("Estimated tokens", f"{_format_int(pending_verify_run['projected_prompt_tokens'])} input, {_format_int(pending_verify_run['projected_completion_tokens'])} output"),
-                ("Estimated cost", _format_currency(pending_verify_run["projected_total"])),
+                ("Can skip Tavily", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
+                ("Need Tavily web search", _format_int(pending_verify_run["projected_tavily_calls"])),
+                ("Estimated Tavily billed cost", _format_currency(pending_verify_run["projected_tavily_bill"])),
+                ("Estimated web-search time", _format_duration(int((pending_verify_run["projected_tavily_calls"] / max(1, pending_verify_run["tavily_workers"])) * 3.0))),
             ],
         )
         if homepage_checked <= 0:
-            st.warning("Check company pages before running web search and scoring.")
-        elif int(metrics.get("openai_scored") or 0) <= 0:
-            if st.button("Run web search and scoring", type="primary", use_container_width=True, key="start_paid_run_inline"):
+            st.warning("Check company pages before running web search.")
+        elif int(pending_verify_run["projected_tavily_calls"]) > 0:
+            if st.button("Run web search", type="primary", use_container_width=True, key="start_web_search_inline"):
                 st.session_state["active_verify_mode"] = pending_mode
-                st.session_state["start_paid_run_requested"] = True
+                st.session_state["start_web_search_requested"] = True
+                st.rerun()
+
+        if homepage_checked > 0 and int(pending_verify_run["projected_tavily_calls"]) <= 0:
+            _render_phase_panel(
+                "after",
+                "Web-search data is ready",
+                "Companies either had enough company-page data or now have Tavily web-search data.",
+                [
+                    ("Scored from company pages", _format_int(tavily_avoided)),
+                    ("Tavily Search API calls recorded", _format_int(run_totals.get("tavily_calls") or 0)),
+                    ("Companies with source data", _format_int(metrics.get("enriched") or 0)),
+                ],
+            )
+    else:
+        _render_phase_panel(
+            "before",
+            "Web search is not ready yet",
+            "Load, normalize, remove exclusions, and check company pages before Tavily web search.",
+            [("Run status", "Not ready")],
+        )
+        st.warning("Load the Manifest list before estimating web search.")
+elif slide["key"] == "score":
+    if pending_verify_run:
+        prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
+        pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode)
+        pending_mode = pending_verify_run.get("mode", verify_mode)
+        scoreable_count = len(db.enriched_for_openai_scoring(conn, limit=int(prospect_cap), force=False, mode=verify_mode))
+        projected_openai_calls = int(pending_verify_run["projected_openai_calls"])
+        _render_phase_panel(
+            "before",
+            "Scoring setup",
+            "Score companies after company-page data and Tavily web-search data are ready.",
+            [
+                ("Companies ready to score", _format_int(scoreable_count)),
+                ("OpenAI API scoring calls planned", _format_int(projected_openai_calls)),
+                ("Estimated tokens", f"{_format_int(pending_verify_run['projected_prompt_tokens'])} input, {_format_int(pending_verify_run['projected_completion_tokens'])} output"),
+                ("Estimated OpenAI token cost", _format_currency(pending_verify_run["projected_openai_estimate"])),
+                ("Estimated scoring time", _format_duration(int((projected_openai_calls / max(1, pending_verify_run["openai_workers"])) * 4.0))),
+            ],
+        )
+        if int(cascade_summary.get("homepage_attempted") or 0) <= 0:
+            st.warning("Check company pages before scoring.")
+        elif int(pending_verify_run["projected_tavily_calls"]) > 0:
+            st.warning("Run web search before scoring so companies that need Tavily data are ready.")
+        elif projected_openai_calls > 0 and int(metrics.get("openai_scored") or 0) <= 0:
+            if st.button("Run OpenAI scoring", type="primary", use_container_width=True, key="start_scoring_inline"):
+                st.session_state["active_verify_mode"] = pending_mode
+                st.session_state["start_scoring_requested"] = True
                 st.rerun()
 
         if int(metrics.get("openai_scored") or 0) > 0:
             _render_phase_panel(
                 "after",
-                "Search and scoring results are available",
-                "The run has saved scored companies, provider-call counts, token usage, and local cost estimates.",
+                "Scored companies are ready",
+                "The run has saved OpenAI scores, token usage, and local cost estimates.",
                 [
                     ("OpenAI-scored companies", _format_int(metrics.get("openai_scored") or 0)),
-                    ("Scored from company pages", _format_int(tavily_avoided)),
-                    ("Tavily Search API calls recorded", _format_int(run_totals.get("tavily_calls") or 0)),
-                    ("OpenAI API scoring calls recorded", _format_int(run_totals.get("openai_calls") or 0)),
+                    ("OpenAI API calls recorded", _format_int(run_totals.get("openai_calls") or 0)),
                     ("OpenAI API tokens recorded", _format_int(run_totals.get("total_tokens") or 0)),
                     ("Estimated OpenAI token cost", _format_currency(local_openai_estimate)),
                 ],
             )
-        else:
-            st.info("No scored companies yet. Run web search and scoring when the estimate looks right.")
     else:
         _render_phase_panel(
             "before",
-            "Run estimate is not ready yet",
-            "Load, normalize, remove exclusions, and check company pages before web search and scoring.",
+            "Scoring estimate is not ready yet",
+            "Load, normalize, remove exclusions, check company pages, and run web search before scoring.",
             [("Run status", "Not ready")],
         )
-        st.warning("Load the Manifest list before estimating search and scoring.")
+        st.warning("Load the Manifest list before estimating scoring.")
 elif slide["key"] == "cost":
     footer_action_label = "Next"
     footer_action_target = "next"
