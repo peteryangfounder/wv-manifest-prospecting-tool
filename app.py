@@ -63,7 +63,7 @@ DISPLAY_LABELS = {
     "consulting": "Consulting",
     "consulting_or_agency": "Consulting or agency",
     "consumer": "Consumer",
-    "data_confidence": "Source confidence",
+    "data_confidence": "Source data confidence",
     "duplicate_or_noisy_entry": "Placeholder or noisy entry",
     "fintech": "Fintech",
     "food": "Food",
@@ -92,12 +92,12 @@ DISPLAY_LABELS = {
     "technology": "Technology",
     "traction_signal": "Traction signal",
     "university_government_nonprofit": "University, government, or nonprofit",
-    "unknown": "Needs review",
-    "unknown_needs_enrichment": "Needs review",
-    "venture_backability": "Venture backability",
+    "unknown": "Unclassified",
+    "unknown_needs_enrichment": "Unclassified",
+    "venture_backability": "Venture-scale potential",
     "warehouse_automation": "Warehouse automation",
     "wittington_edge": "Wittington edge",
-    "wv_sector_fit": "WV sector fit",
+    "wv_sector_fit": "Wittington sector match",
 }
 
 GENERIC_PLACEHOLDERS = {
@@ -131,15 +131,15 @@ OPENAI_MODEL_PRESETS = {
 VERIFY_MODE_PRESETS = {
     "balanced": {
         "label": "Balanced",
-        "description": "High-signal and likely-tech rows first, then ambiguous candidates within the approved cap.",
+        "description": "Score likely technology companies first, then unclassified companies inside the approved batch size.",
     },
     "precision-first": {
         "label": "Precision-first",
-        "description": "Only likely startup or technology rows. Lower noise, higher false-negative risk.",
+        "description": "Score only companies classified as startup or technology companies.",
     },
     "recall-first": {
         "label": "Recall-first",
-        "description": "Broad candidate coverage. Best for audits and large budget-approved runs.",
+        "description": "Score all API-eligible company types inside the approved batch size.",
     },
 }
 
@@ -1433,19 +1433,19 @@ def _render_guided_steps(metrics: dict) -> None:
         _step_row(
             1,
             "Prepare source list",
-            "Load, deduplicate, and remove obvious non-prospects.",
+            "Load names, merge duplicates, and remove excluded company types.",
             "Done" if stage > 1 else "Active",
         ),
         _step_row(
             2,
-            "Verify prospects",
+            "Search and score",
             "Check homepage metadata first. Run search and scoring after approval.",
             "Done" if stage > 2 else "Active" if stage == 2 else "Locked",
         ),
         _step_row(
             3,
             "Review results",
-            "Review ranked prospects and exports.",
+            "Review scored companies and exports.",
             "Active" if stage == 3 else "Locked",
         ),
     ]
@@ -1815,7 +1815,7 @@ def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
         source_url = row.get("homepage_resolved_url") or row.get("website") or row.get("primary_source_url") or ""
         snippets = row.get("top_snippets") or []
         support_snippet = row.get("support_preview") or (snippets[0] if snippets else "")
-        support_snippet = _clean_ui_text(_truncate(support_snippet or row.get("evidence_summary") or "No supporting source detail available.", 160))
+        support_snippet = _clean_ui_text(_truncate(support_snippet or row.get("evidence_summary") or "No source text available.", 160))
         evidence_confidence = (
             _format_percent(float(row.get("homepage_evidence_quality") or 0.0))
             if float(row.get("homepage_evidence_quality") or 0.0) > 0
@@ -1826,11 +1826,11 @@ def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
             "<div class='prospect-main'>"
             f"<div class='prospect-rank'>Rank {rank}</div>"
             f"<div class='prospect-name'>{html.escape(_clean_ui_text(row.get('canonical_name')))}</div>"
-            f"<div class='route-meta'>Source detail: {html.escape(evidence_source)}</div>"
+            f"<div class='route-meta'>Source type: {html.escape(evidence_source)}</div>"
             f"<div class='route-meta'>Source URL: {_safe_link(str(source_url or ''), 'Open') if source_url else 'None'}</div>"
             "</div>"
             "<div class='prospect-score'>"
-            "<div class='prospect-score-label'>Fit score</div>"
+            "<div class='prospect-score-label'>Total score</div>"
             "<div class='score-cell'>"
             "<div class='score-track'>"
             f"<span class='score-fill' style='width:{max(0, min(100, score))}%'></span>"
@@ -1840,12 +1840,12 @@ def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
             f"<div class='prospect-tags'>{_tag_pills(row.get('sector_tags'))}</div>"
             "</div>"
             "<div class='prospect-evidence'>"
-            "<div class='prospect-support-title'>Why it ranked</div>"
+            "<div class='prospect-support-title'>Source text</div>"
             f"{html.escape(support_snippet)}"
             f"<div class='route-meta'>Positive: {_signal_pills(row.get('homepage_positive_signals'), 'Not captured')}</div>"
             f"<div class='route-meta'>Negative: {_signal_pills(row.get('homepage_negative_signals'), 'Not captured')}</div>"
-            f"<div class='route-meta'>Source confidence: {html.escape(_clean_ui_text(evidence_confidence))}</div>"
-            f"<div class='route-meta'>Open question: {html.escape(_clean_ui_text(row.get('homepage_route_reason') or row.get('evidence_summary') or 'No data-gap reason recorded.'))}</div>"
+            f"<div class='route-meta'>Source data confidence: {html.escape(_clean_ui_text(evidence_confidence))}</div>"
+            f"<div class='route-meta'>Status note: {html.escape(_clean_ui_text(row.get('homepage_route_reason') or row.get('evidence_summary') or 'No data-gap reason recorded.'))}</div>"
             "</div>"
             "</div>"
         )
@@ -1915,7 +1915,7 @@ def _render_workflow(metrics: dict) -> None:
         "<div class='workflow-caption'>{source_caption}</div>"
         "</div>"
         "<div class='workflow-step {prospect_class}'>"
-        "<div class='workflow-title'>2. Refined prospects</div>"
+        "<div class='workflow-title'>2. Scored companies</div>"
         "<div class='workflow-caption'>{prospect_caption}</div>"
         "</div>".format(
             source_class=source_class,
@@ -1928,7 +1928,7 @@ def _render_workflow(metrics: dict) -> None:
             prospect_caption=(
                 f"{_format_int(metrics.get('openai_scored'))} companies scored"
                 if has_verified
-                else "Enrich and score a capped batch"
+                else "Search and score a capped batch"
             ),
         ),
         unsafe_allow_html=True,
@@ -2023,7 +2023,7 @@ if st.session_state.pop("start_paid_run_requested", False):
         preview.markdown(
             _prospect_cards_html(
                 latest_prospects,
-                "Verified prospects will appear here as scoring completes.",
+                "Scored companies will appear here as scoring completes.",
             ),
             unsafe_allow_html=True,
         )
@@ -2051,7 +2051,7 @@ if st.session_state.pop("start_paid_run_requested", False):
     run_tavily_billed = float(enrich_result.counts.get("tavily_actual_billed_usd") or 0)
     st.session_state["last_action"] = {
         "message": (
-            f"Verified {score_result.counts.get('scored', 0):,} companies from a {cap:,}-company {VERIFY_MODE_PRESETS.get(active_verify_mode, VERIFY_MODE_PRESETS['balanced'])['label'].lower()} batch. "
+            f"Scored {score_result.counts.get('scored', 0):,} companies from a {cap:,}-company {VERIFY_MODE_PRESETS.get(active_verify_mode, VERIFY_MODE_PRESETS['balanced'])['label'].lower()} batch. "
             f"Local OpenAI token estimate: {_format_currency(run_openai_estimate)}. "
             f"Tavily credits consumed: {run_tavily_credits:,}; Tavily billed spend: {_format_currency(run_tavily_billed)}."
         ),
@@ -2152,13 +2152,13 @@ if pending_verify_run:
     ]
 
 slides = [
-    {"key": "overview", "label": "Overview", "title": "Manifest list to ranked prospects.", "copy": "Clean the attendee list, check company pages, search the web where needed, then score the companies for review."},
-    {"key": "source", "label": "Step 1", "title": "Prepare the Manifest list.", "copy": "Load attendee company names, merge duplicates, and remove rows outside the venture pipeline."},
+    {"key": "overview", "label": "Overview", "title": "Manifest list to scored companies.", "copy": "Load company names, remove excluded categories, check company pages, run web search when page data is incomplete, then score the remaining companies."},
+    {"key": "source", "label": "Step 1", "title": "Prepare the Manifest list.", "copy": "Load attendee company names, merge duplicates, and remove rows that match excluded categories."},
     {"key": "homepage", "label": "Step 2", "title": "Check company pages.", "copy": "Read domains, page titles, descriptions, headings, and short homepage text before web search."},
     {"key": "estimate", "label": "Step 3", "title": "Approve the run.", "copy": "Review the batch size, search volume, scoring volume, runtime, tokens, and estimated cost."},
     {"key": "cost", "label": "Step 4", "title": "Track spend.", "copy": "View provider billing, included Tavily credits, and local token estimates separately."},
-    {"key": "prospects", "label": "Step 5", "title": "Review prospects.", "copy": "Sort the scored companies by fit and inspect the company page or search results behind each score."},
-    {"key": "routing", "label": "Step 6", "title": "Review data coverage.", "copy": "See which companies were ready from homepage metadata and which still need web search."},
+    {"key": "prospects", "label": "Step 5", "title": "Review scored companies.", "copy": "Sort companies by total score and inspect the page text or search results used for scoring."},
+    {"key": "routing", "label": "Step 6", "title": "Review company data status.", "copy": "See which companies have usable page data and which companies need web search."},
 ]
 slide_count = len(slides)
 slide_index = int(st.session_state.get("slide_index", 0))
@@ -2170,7 +2170,7 @@ st.markdown(
     """
     <div class="wv-header">
       <h1 class="wv-title">Manifest Prospecting Tool</h1>
-      <p class="wv-subtitle">Company sourcing for Wittington Ventures.</p>
+      <p class="wv-subtitle">Scores Manifest attendee companies for Wittington Ventures.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -2182,11 +2182,11 @@ if slide["key"] == "overview":
     _render_flow_steps(
         [
             ("Source", "Load and deduplicate Manifest companies."),
-            ("Screen", "Remove rows outside the venture pipeline."),
+            ("Screen", "Remove incumbents, investors, associations, service firms, and noisy rows."),
             ("Company page", "Read domains, titles, descriptions, and snippets."),
-            ("Web search", "Use Tavily for companies that need more context."),
-            ("Score", "Score each company against the sourcing thesis."),
-            ("Review", "Show ranked prospects and spend."),
+            ("Web search", "Use Tavily when company page data is incomplete."),
+            ("Score", "Score each company against Wittington criteria."),
+            ("Review", "Show scored companies and spend."),
         ],
     )
 elif slide["key"] == "source":
@@ -2203,8 +2203,8 @@ elif slide["key"] == "source":
         [
             ("Input", "Public Manifest attendee list"),
             ("Cleaned list", "Names normalized and duplicates merged"),
-            ("Removed", "Incumbents, investors, associations, service firms, and noisy rows"),
-            ("Next queue", f"{_format_int(candidate_count)} companies ready for page checks and search"),
+            ("Removed", "Incumbents, investors, associations, consulting firms, agencies, service providers, and noisy rows"),
+            ("Remaining rows", f"{_format_int(candidate_count)} companies ready for page checks and search"),
         ],
     )
     if workflow_stage == 1 and st.button("Load and screen Manifest list", type="primary", use_container_width=True):
@@ -2214,7 +2214,7 @@ elif slide["key"] == "homepage":
     _render_mini_metrics(
         [
             ("Company pages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
-            ("Ready from page", _format_int(cascade_summary.get("score_from_homepage") or 0)),
+            ("Page data used for scoring", _format_int(cascade_summary.get("score_from_homepage") or 0)),
             ("Queued for search", _format_int(cascade_summary.get("needs_tavily") or 0)),
             ("Missing data", _format_int(cascade_summary.get("data_gaps") or 0)),
         ]
@@ -2223,8 +2223,8 @@ elif slide["key"] == "homepage":
         "Page check",
         [
             ("Reads", "Domains, page titles, descriptions, headings, and snippets"),
-            ("Ready from page", f"{_format_int(tavily_avoided)} companies"),
-            ("Next", "Companies with thin page data move to web search"),
+            ("Page data used for scoring", f"{_format_int(tavily_avoided)} companies"),
+            ("Next", "Companies with incomplete page data move to web search"),
         ],
     )
     if pending_verify_run and st.button("Check one company page", type="primary", use_container_width=True):
@@ -2273,7 +2273,7 @@ elif slide["key"] == "cost":
             ("Actual billed cost", _format_billed_total(provider_spend)),
             ("OpenAI tokens", _format_int(int(run_totals.get("total_tokens") or 0))),
             ("Search credits used", _format_int(tavily_billing.credits_used)),
-            ("Ready from company pages", _format_int(tavily_avoided)),
+            ("Scored from company pages", _format_int(tavily_avoided)),
         ]
     )
     _render_cost_hero(
@@ -2291,15 +2291,15 @@ elif slide["key"] == "cost":
 elif slide["key"] == "prospects":
     _render_prospect_cards(
         prospects.head(5),
-        "No scored prospects yet. Run search and scoring first.",
+        "No scored companies yet. Run search and scoring first.",
     )
 elif slide["key"] == "routing":
     _render_summary_card(
-        "Data coverage",
+        "Company data status",
         [
             ("API-eligible companies", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
             ("Company pages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
-            ("Ready from company page", _format_int(cascade_summary.get("score_from_homepage") or 0)),
+            ("Page data used for scoring", _format_int(cascade_summary.get("score_from_homepage") or 0)),
             ("Queued for web search", _format_int(cascade_summary.get("needs_tavily") or 0)),
             ("Missing data", _format_int(cascade_summary.get("data_gaps") or 0)),
         ],
