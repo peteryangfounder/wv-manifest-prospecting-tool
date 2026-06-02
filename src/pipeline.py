@@ -199,7 +199,7 @@ def enrich_candidates(
             {"tavily_calls": 0, "enriched": 0, "cache_hits": 0},
         )
 
-    companies = db.candidates_for_enrichment(conn, limit=limit, force=force, high_priority_only=True)
+    companies = db.candidates_for_enrichment(conn, limit=limit, force=force)
     calls = 0
     enriched = 0
     errors = 0
@@ -296,7 +296,7 @@ def score_enriched_candidates(
             {"openai_calls": 0, "scored": 0, "errors": 0},
         )
 
-    companies = db.enriched_for_openai_scoring(conn, limit=limit, force=force, high_priority_only=True)
+    companies = db.enriched_for_openai_scoring(conn, limit=limit, force=force)
     calls = 0
     scored = 0
     errors = 0

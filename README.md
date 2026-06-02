@@ -131,15 +131,28 @@ The current live scrape produced this first-pass funnel:
 - 3,288 raw attendee rows from the Manifest page.
 - 3,239 unique companies after normalization and deduplication.
 - 2,444 broad candidates after excluding obvious non-targets.
-- 158 high-priority companies selected for the first paid enrichment queue.
+- 281 likely startup or technology rows based on explicit name signals.
+- 158 high-signal rows that run first inside the paid enrichment queue.
 
-The 158-company queue is not the same thing as saying only 158 companies in the whole dataset could ever be interesting. It is a precision-first queue for the first API-backed pass. The broader 2,444-candidate universe remains in SQLite and can be enriched later with a larger budget, looser filters, richer data providers, or human-selected batches.
+The 158 high-signal rows are no longer the full paid API boundary. They are the first lane in a ranked queue. The app now enriches high-signal rows first, then continues into other likely-technology rows, then into ambiguous broad candidates until the user-approved batch cap is reached. With a 1,000-company cap on a fresh scrape, the queue contains all 281 likely startup/technology rows plus 719 ambiguous candidates. The broader 2,444-candidate universe remains in SQLite and can be enriched with a larger budget, looser filters, richer data providers, or human-selected batches.
 
-The deterministic rules are intentionally simple and inspectable. They exclude categories that are unlikely to be venture prospects based on the attendee name alone: known large incumbents, investors, banks, associations, media organizations, universities, government entities, consultancies, agencies, legal firms, generic placeholders, retailers or brands without technology signals, and logistics service providers without software, platform, automation, AI, analytics, TMS, WMS, or similar product signals.
+The deterministic rules are intentionally inspectable. They make only hard, explainable decisions before paid enrichment:
 
-Rows with clear technology or Wittington-relevant signals become high priority. Examples of high-priority signals include `AI`, `.ai`, robotics, software, SaaS, platform, automation, analytics, visibility, autonomous systems, optimization, TMS, WMS, machine learning, computer vision, warehouse automation, retail infrastructure, healthcare operations, climate, sustainability, carbon, and emissions.
+1. Normalize the raw name for matching while preserving the displayed company name.
+2. Tag obvious sector words such as commerce, healthcare, consumer, food, climate, logistics, supply chain, retail infrastructure, warehouse automation, robotics, AI, and fintech.
+3. Exclude generic or incomplete entries such as `startup`, `stealth`, `student`, `none`, `unknown`, and similar placeholders.
+4. Exclude Wittington-related rows so the fund is not scored as its own prospect.
+5. Exclude known large incumbents such as Amazon, Microsoft, DHL, FedEx, UPS, Walmart, Google, Oracle, IBM, Costco, Loblaw, Target, and similar non-venture prospects.
+6. Exclude investor and financial-firm rows using terms such as venture, capital, private equity, investment, asset management, wealth, bank, securities, partners, accelerator, and family office.
+7. Exclude media, event, association, university, government, nonprofit, consulting, agency, advisory, legal, and accounting-service rows.
+8. Exclude logistics-service rows only when they have logistics words but no software, platform, automation, AI, analytics, visibility, optimization, TMS, WMS, robotics, or similar technology signal.
+9. Include rows with explicit technology signals as likely startup or technology candidates.
+10. Exclude retailer, brand, CPG, apparel, beauty, foodservice, or beverage rows when they have no technology signal.
+11. Keep everything else as `unknown_needs_enrichment`, which means ambiguous rows are preserved for later paid enrichment instead of being thrown away.
 
-This is why the demo can be very cost-effective. The app avoids paying Tavily and OpenAI to inspect obvious non-prospects, starts with the rows most likely to contain technology companies, reuses cached provider results, and uses compact prompts with a low-cost OpenAI model. This is a cost-control architecture, not an assertion that the first pass has perfect recall.
+Rows with clear technology or Wittington-relevant signals run first. Examples of fast-lane signals include `AI`, `.ai`, robotics, software, SaaS, platform, automation, analytics, visibility, autonomous systems, optimization, TMS, WMS, machine learning, computer vision, warehouse automation, retail infrastructure, healthcare operations, climate, sustainability, carbon, and emissions.
+
+This is why the demo can be cost-effective without relying on a brittle keyword-only boundary. The app avoids paying Tavily and OpenAI to inspect obvious non-prospects, starts with rows most likely to contain technology companies, then keeps moving into ambiguous candidates within the approved batch cap. It reuses cached provider results and uses compact prompts with a low-cost OpenAI model. This is a ranked cost-control architecture, not an assertion that company names alone are enough to identify every investable startup.
 
 ## Billing And Usage Tracking
 
@@ -236,7 +249,7 @@ Create a Streamlit Cloud app from this repository, set `app.py` as the entrypoin
 - The seed attendee file is included for reliability, but the live scrape should be rerun before a demo.
 - Funding stage is inferred from public snippets unless a richer company-data API is added.
 - OpenAI scoring depends on retrieved evidence quality, so thin evidence is marked low confidence.
-- The high-priority queue is optimized for precision and cost control, not exhaustive recall. Stealth companies or companies with generic names may need a broader enrichment pass.
+- The first API pass is ranked for cost control. Ambiguous companies are included after high-signal rows, but a full recall pass still requires a larger approved batch cap or richer data sources.
 - Long provider runs are synchronous in the current Streamlit app; a background worker architecture would be needed for true pause/resume/cancel across sessions.
 
 ## Related Notes

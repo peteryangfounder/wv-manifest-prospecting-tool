@@ -1112,10 +1112,14 @@ def _tavily_billing_from_metrics(metrics: dict, settings) -> TavilyBillingSummar
 
 
 def _estimate_verify_run(conn, metrics: dict, settings, cap: int) -> dict:
-    tavily_candidates = db.candidates_for_enrichment(conn, limit=cap, force=False, high_priority_only=True)
-    currently_scoreable = db.enriched_for_openai_scoring(conn, limit=cap, force=False, high_priority_only=True)
+    tavily_candidates = db.candidates_for_enrichment(conn, limit=cap, force=False)
+    currently_scoreable = db.enriched_for_openai_scoring(conn, limit=cap, force=False)
     projected_tavily_calls = len(tavily_candidates)
     projected_openai_calls = min(cap, len(currently_scoreable) + projected_tavily_calls)
+    high_signal_candidates = sum(1 for candidate in tavily_candidates if int(candidate.get("high_priority_enrichment") or 0) == 1)
+    likely_tech_candidates = sum(1 for candidate in tavily_candidates if candidate.get("deterministic_type") == "likely_startup_or_tech")
+    ambiguous_candidates = sum(1 for candidate in tavily_candidates if candidate.get("deterministic_type") == "unknown_needs_enrichment")
+    other_likely_tech_candidates = max(0, likely_tech_candidates - high_signal_candidates)
 
     totals = metrics.get("run_totals") or {}
     historical_openai_calls = max(1, int(totals.get("openai_calls") or 0))
@@ -1162,6 +1166,9 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int) -> dict:
         "cap": cap,
         "projected_tavily_calls": projected_tavily_calls,
         "projected_openai_calls": projected_openai_calls,
+        "high_signal_candidates": high_signal_candidates,
+        "other_likely_tech_candidates": other_likely_tech_candidates,
+        "ambiguous_candidates": ambiguous_candidates,
         "projected_prompt_tokens": projected_prompt_tokens,
         "projected_completion_tokens": projected_completion_tokens,
         "projected_openai_estimate": projected_openai_estimate,
@@ -1574,7 +1581,7 @@ if workflow_stage == 1:
 elif workflow_stage == 2:
     st.markdown("<div class='guided-title'>Step 2: Verify prospects with APIs</div>", unsafe_allow_html=True)
     st.markdown(
-        "<div class='guided-copy'>Next, choose the batch size and model, then run search enrichment and OpenAI scoring for the next high-priority companies.</div>",
+        "<div class='guided-copy'>Next, choose the batch size and model, then run search enrichment and OpenAI scoring for the next ranked candidates.</div>",
         unsafe_allow_html=True,
     )
 else:
@@ -1601,7 +1608,7 @@ if workflow_stage >= 2:
         value=int(st.session_state.get("prospect_cap", min(settings.max_score, 100))),
         step=5,
         key="prospect_cap",
-        help="Maximum number of high-priority companies to enrich and score in this API run.",
+        help="Maximum number of ranked candidate companies to enrich and score in this API run. Strong signal rows run first, followed by broader ambiguous candidates.",
     )
     selected_model = settings_cols[1].selectbox(
         "OpenAI scoring model",
@@ -1656,6 +1663,14 @@ if pending_verify_run and run_step != "source":
             ("Batch cap", _format_int(pending_verify_run["cap"])),
             ("Uncached Tavily calls", _format_int(pending_verify_run["projected_tavily_calls"])),
             ("Projected OpenAI scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
+            (
+                "Candidate mix",
+                (
+                    f"{_format_int(pending_verify_run['high_signal_candidates'])} high-signal, "
+                    f"{_format_int(pending_verify_run['other_likely_tech_candidates'])} other likely-tech, "
+                    f"{_format_int(pending_verify_run['ambiguous_candidates'])} ambiguous"
+                ),
+            ),
             ("Projected input tokens", _format_int(pending_verify_run["projected_prompt_tokens"])),
             ("Projected output tokens", _format_int(pending_verify_run["projected_completion_tokens"])),
             ("Estimated OpenAI token-rate cost", _format_currency(pending_verify_run["projected_openai_estimate"])),

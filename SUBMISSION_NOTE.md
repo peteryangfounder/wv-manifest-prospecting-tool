@@ -14,15 +14,29 @@ The rules layer also creates a high-priority enrichment queue. That queue helps 
 
 ## Funnel Math
 
-The first-pass funnel is deliberately cost-aware. On the current live Manifest scrape, the app retrieved 3,288 raw attendee rows and normalized them to 3,239 unique companies. The deterministic rules marked 2,444 as broad candidates and 158 as high-priority paid-enrichment rows.
+The first-pass funnel is deliberately cost-aware. On the current live Manifest scrape, the app retrieved 3,288 raw attendee rows and normalized them to 3,239 unique companies. The deterministic rules marked 2,444 as broad candidates, 281 as likely startup or technology rows, and 158 as high-signal fast-lane rows.
 
-That distinction is important. The app does not claim that only 158 companies are possible prospects. It claims that 158 rows have enough explicit technology or Wittington-relevant signal in the attendee name to justify being first in line for paid API enrichment. The rest of the broad candidate universe remains stored, visible, and available for later enrichment. This keeps the demo inexpensive while preserving optionality.
+That distinction is important. The app does not claim that only 158 companies are possible prospects. It claims that 158 rows have enough explicit technology or Wittington-relevant signal in the attendee name to justify running first. The paid API queue is now ranked rather than restricted: high-signal rows run first, other likely startup or technology rows run next, and ambiguous broad candidates run after that until the user-approved batch cap is reached. With a 1,000-company cap on a fresh scrape, the queue contains all 281 likely startup or technology rows plus 719 ambiguous candidates.
 
-The broad candidate count is high because the rules are conservative about exclusion. If a row is ambiguous and cannot be confidently identified as a non-target, it remains a candidate. The high-priority count is lower because that queue requires stronger positive signals such as `AI`, `.ai`, robotics, software, SaaS, platform, automation, analytics, visibility, autonomous systems, optimization, TMS, WMS, machine learning, computer vision, warehouse automation, retail infrastructure, healthcare operations, climate, sustainability, carbon, or emissions.
+The broad candidate count is high because the rules are conservative about exclusion. If a row is ambiguous and cannot be confidently identified as a non-target, it remains a candidate. The high-signal count is lower because that first lane requires stronger positive signals such as `AI`, `.ai`, robotics, software, SaaS, platform, automation, analytics, visibility, autonomous systems, optimization, TMS, WMS, machine learning, computer vision, warehouse automation, retail infrastructure, healthcare operations, climate, sustainability, carbon, or emissions.
 
 The cheap first pass uses deterministic string matching, curated keyword groups, normalized names, and explicit exclusion lists. It does not use an LLM and it does not perform hidden reasoning. That is a feature: the rules are transparent, fast, testable, and easy to challenge in a review meeting. If a partner disagrees with a rule, the rule can be changed and the full source universe can be rescored without re-running paid provider calls.
 
-The risk is recall. A stealth startup with a generic name and no obvious technology signal may not enter the first paid queue. The mitigation is that it is not deleted. It remains in the source list and broad candidate set, with a baseline score and deterministic tags. A production version should add additional cheap recall layers, such as website-domain lookup, embeddings, company database enrichment, partner-selected batches, and first-party CRM signals, before deciding which lower-priority rows deserve paid research.
+The exact deterministic decision flow is:
+
+1. Normalize the raw name for matching while preserving the displayed company name.
+2. Detect sector tags from name-level terms for commerce, healthcare, consumer, food, climate, logistics, supply chain, retail infrastructure, warehouse automation, robotics, AI, and fintech.
+3. Remove generic placeholders and incomplete rows.
+4. Remove Wittington-related rows.
+5. Remove known large incumbents such as Amazon, Microsoft, DHL, FedEx, UPS, Walmart, Google, Oracle, IBM, Costco, Loblaw, and Target.
+6. Remove investor and financial-firm rows based on venture, capital, private equity, investment, asset-management, bank, securities, accelerator, family-office, and related terms.
+7. Remove media, event, association, university, government, nonprofit, consulting, agency, advisory, legal, and accounting-service rows.
+8. Remove logistics-service rows only when they have logistics words but no software, platform, automation, AI, analytics, visibility, optimization, TMS, WMS, robotics, or similar technology signal.
+9. Mark rows with technology signals as likely startup or technology candidates.
+10. Remove retailer, brand, CPG, apparel, beauty, foodservice, or beverage rows when they have no technology signal.
+11. Preserve all remaining ambiguous rows as broad candidates for later enrichment.
+
+The risk is recall if the batch cap is set too low. A stealth startup with a generic name and no obvious technology signal may not appear in the first few hundred rows. The mitigation is that it is not deleted. It remains in the source list and broad candidate set, with a baseline score and deterministic tags, and it can enter a larger paid batch. A production version should add additional cheap recall layers, such as website-domain lookup, embeddings, company database enrichment, partner-selected batches, and first-party CRM signals, before deciding which lower-priority rows deserve paid research.
 
 ## Enrichment And Scoring
 
@@ -66,9 +80,9 @@ Before a verification run starts, the dashboard shows a confirmation step with p
 
 The recommended current Tavily setting is pay-as-you-go disabled. That keeps the demo cost-controlled and avoids automated overage billing. Pay-as-you-go should only be enabled if Wittington explicitly wants larger uncached runs to continue beyond included credits.
 
-The near-zero current cost is explainable rather than mysterious. The app avoids paid calls on obvious non-prospects, begins with a 158-row high-priority queue instead of the full 3,239-company universe, reuses cached provider results, keeps Tavily within included plan credits, and uses compact OpenAI prompts with `gpt-4o-mini`. The dashboard can show `$0.00` live provider billing while the internal OpenAI token-rate estimate shows a fraction of a cent or a few cents because platform billing can round, cache, or lag behind local token accounting.
+The near-zero current cost is explainable rather than mysterious. The app avoids paid calls on obvious non-prospects, ranks the 2,444 broad candidates before enrichment, reuses cached provider results, keeps Tavily within included plan credits, and uses compact OpenAI prompts with `gpt-4o-mini`. The dashboard can show `$0.00` live provider billing while the internal OpenAI token-rate estimate shows a fraction of a cent or a few cents because platform billing can round, cache, or lag behind local token accounting.
 
-The right explanation to Wittington is not that the app made 3,000 nuanced investment decisions for free. The accurate explanation is that it performed a transparent, deterministic triage for free, then spent API calls only on the highest-signal rows. That is exactly the point of the architecture: use code for the cheap mechanical narrowing, use search and AI where judgment and evidence synthesis are actually valuable, and keep the full source universe available when more recall is needed.
+The right explanation to Wittington is not that the app made 3,000 nuanced investment decisions for free. The accurate explanation is that it performed a transparent, deterministic triage for free, then spent API calls on a ranked queue inside the approved budget. That is exactly the point of the architecture: use code for cheap mechanical exclusion, use search and AI where judgment and evidence synthesis are actually valuable, and keep the full source universe available when more recall is needed.
 
 ## Interface Decisions
 
@@ -86,7 +100,7 @@ The app prioritizes caching and rule screening before paid APIs. This keeps cost
 
 The current provider architecture is optimized for network-bound I/O. It should scale materially better than serial processing for thousands of rows, but the correct concurrency settings still depend on provider rate limits, account tier, and acceptable spend. The app therefore exposes worker counts, estimated cost, and estimated runtime before execution instead of hiding those operational choices.
 
-The biggest technical tradeoff is precision versus recall in the first API-backed pass. The current default is precision-first because the assignment asked for a useful ranked prospect list and because paid search/model calls should not be wasted on obvious non-prospects. For a production fund workflow, the next step would be configurable recall modes: a low-cost first pass, a broader partner-reviewed pass, and a full-universe pass with explicit spend approval.
+The biggest technical tradeoff is precision versus recall in the first API-backed pass. The current default is ranked rather than exclusive: high-signal rows run first for precision, but ambiguous candidates remain eligible within the same approved batch for recall. For a production fund workflow, the next step would be configurable recall modes: a low-cost first pass, a broader partner-reviewed pass, and a full-universe pass with explicit spend approval.
 
 ## Validation
 

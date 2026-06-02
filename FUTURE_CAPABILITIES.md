@@ -10,7 +10,7 @@ The data model should treat Manifest as one source adapter. Additional adapters 
 
 For arbitrary datasets, the app should support column mapping. A user should be able to map source columns such as company name, website, country, category, description, employee count, funding stage, source URL, contact name, email, and notes. When a row already includes useful first-party or third-party fields, the pipeline should use them instead of paying to rediscover the same facts.
 
-The source funnel should become configurable by campaign. The current Manifest demo uses a precision-first high-priority queue so obvious technology companies are enriched first and costs stay low. A production version should let a user choose between precision-first, balanced, and recall-first modes. Precision-first would enrich only high-signal rows. Balanced mode would sample ambiguous rows and include partner-selected companies. Recall-first would enrich the broader candidate universe after an explicit cost approval step.
+The source funnel should become configurable by campaign. The current Manifest demo uses a ranked candidate queue so obvious technology companies are enriched first and ambiguous candidates remain eligible after them. A production version should let a user choose between precision-first, balanced, and recall-first modes. Precision-first would enrich only high-signal rows. Balanced mode would include likely-tech rows plus a large ambiguous slice. Recall-first would enrich the broader candidate universe after an explicit cost approval step.
 
 ## First-Party Wittington Data
 

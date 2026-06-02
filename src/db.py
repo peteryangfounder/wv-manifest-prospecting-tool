@@ -360,16 +360,24 @@ def candidates_for_enrichment(
     conn: sqlite3.Connection,
     limit: int,
     force: bool = False,
-    high_priority_only: bool = True,
+    high_priority_only: bool = False,
 ) -> list[dict[str, Any]]:
     priority_filter = "AND c.high_priority_enrichment = 1" if high_priority_only else ""
+    priority_order = """
+              CASE
+                WHEN c.high_priority_enrichment = 1 THEN 0
+                WHEN c.deterministic_type = 'likely_startup_or_tech' THEN 1
+                WHEN c.deterministic_type = 'unknown_needs_enrichment' THEN 2
+                ELSE 3
+              END,
+    """
     if force:
         query = f"""
             SELECT c.*
             FROM companies c
             WHERE c.is_candidate = 1 {priority_filter}
             ORDER BY
-              CASE c.deterministic_type WHEN 'likely_startup_or_tech' THEN 0 ELSE 1 END,
+              {priority_order}
               c.canonical_name COLLATE NOCASE
             LIMIT ?
         """
@@ -381,7 +389,7 @@ def candidates_for_enrichment(
               ON e.company_id = c.id AND e.provider = 'tavily' AND e.status = 'success'
             WHERE c.is_candidate = 1 {priority_filter} AND e.id IS NULL
             ORDER BY
-              CASE c.deterministic_type WHEN 'likely_startup_or_tech' THEN 0 ELSE 1 END,
+              {priority_order}
               c.canonical_name COLLATE NOCASE
             LIMIT ?
         """
@@ -393,13 +401,21 @@ def enriched_for_openai_scoring(
     conn: sqlite3.Connection,
     limit: int,
     force: bool = False,
-    high_priority_only: bool = True,
+    high_priority_only: bool = False,
 ) -> list[dict[str, Any]]:
     if force:
         score_filter = ""
     else:
         score_filter = "AND (s.id IS NULL OR s.provider != 'openai')"
     priority_filter = "AND c.high_priority_enrichment = 1" if high_priority_only else ""
+    priority_order = """
+          CASE
+            WHEN c.high_priority_enrichment = 1 THEN 0
+            WHEN c.deterministic_type = 'likely_startup_or_tech' THEN 1
+            WHEN c.deterministic_type = 'unknown_needs_enrichment' THEN 2
+            ELSE 3
+          END,
+    """
 
     rows = conn.execute(
         f"""
@@ -409,7 +425,7 @@ def enriched_for_openai_scoring(
         LEFT JOIN scores s ON s.company_id = c.id
         WHERE c.is_candidate = 1 {priority_filter} {score_filter}
         ORDER BY
-          CASE c.deterministic_type WHEN 'likely_startup_or_tech' THEN 0 ELSE 1 END,
+          {priority_order}
           c.canonical_name COLLATE NOCASE
         LIMIT ?
         """,
