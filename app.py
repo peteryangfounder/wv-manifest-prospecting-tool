@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import time
 from collections import Counter
 from dataclasses import replace
@@ -20,6 +21,7 @@ from src.billing import (
     fetch_openai_billing_snapshot,
 )
 from src.config import PROJECT_ROOT, get_settings
+from src.classify import SYSTEM_PROMPT, build_user_prompt
 from src.pipeline import (
     collect_homepage_evidence,
     enrich_candidates,
@@ -1867,9 +1869,14 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> 
     historical_openai_calls = max(1, int(totals.get("openai_calls") or 0))
     avg_prompt_tokens = int(totals.get("prompt_tokens") or 0) / historical_openai_calls
     avg_completion_tokens = int(totals.get("completion_tokens") or 0) / historical_openai_calls
+    openai_output_cap = max(1, _setting_int(settings, "openai_max_completion_tokens", 500))
     if int(totals.get("openai_calls") or 0) <= 0:
-        avg_prompt_tokens = 1_000
-        avg_completion_tokens = 250
+        scoreable_prompt_estimates = [_estimate_openai_prompt_tokens(company) for company in currently_scoreable]
+        if scoreable_prompt_estimates:
+            avg_prompt_tokens = sum(scoreable_prompt_estimates) / len(scoreable_prompt_estimates)
+        else:
+            avg_prompt_tokens = 1_000
+        avg_completion_tokens = openai_output_cap
 
     projected_prompt_tokens = int(projected_openai_calls * avg_prompt_tokens)
     projected_completion_tokens = int(projected_openai_calls * avg_completion_tokens)
@@ -1907,7 +1914,7 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> 
     projected_total = projected_tavily_bill + projected_openai_estimate
 
     tavily_workers = max(1, min(_setting_int(settings, "tavily_concurrency", 48), max(1, projected_tavily_calls)))
-    openai_workers = max(1, min(_setting_int(settings, "openai_concurrency", 6), max(1, projected_openai_calls)))
+    openai_workers = max(1, min(_setting_int(settings, "openai_concurrency", 48), max(1, projected_openai_calls)))
     tavily_seconds = projected_tavily_calls / tavily_workers * 3.0 if projected_tavily_calls else 0.0
     openai_seconds = projected_openai_calls / openai_workers * 4.0 if projected_openai_calls else 0.0
     estimated_seconds = int(tavily_seconds + openai_seconds)
@@ -1951,7 +1958,16 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> 
         "estimated_seconds": estimated_seconds,
         "tavily_workers": tavily_workers,
         "openai_workers": openai_workers,
+        "openai_output_cap": openai_output_cap,
     }
+
+
+def _estimate_openai_prompt_tokens(company: dict) -> int:
+    try:
+        prompt_chars = len(SYSTEM_PROMPT) + len(build_user_prompt(dict(company)))
+    except Exception:
+        return 1_000
+    return max(1, math.ceil(prompt_chars / 3.5) + 32)
 
 
 def _format_duration(seconds: int) -> str:
@@ -2893,6 +2909,8 @@ elif slide["key"] == "score":
                 ("OpenAI API scoring calls planned", _format_int(projected_openai_calls)),
                 ("Estimated tokens", f"{_format_int(pending_verify_run['projected_prompt_tokens'])} input, {_format_int(pending_verify_run['projected_completion_tokens'])} output"),
                 ("Estimated OpenAI token cost", _format_currency(pending_verify_run["projected_openai_estimate"])),
+                ("Parallel OpenAI workers", _format_int(pending_verify_run["openai_workers"])),
+                ("Output token cap per call", _format_int(pending_verify_run["openai_output_cap"])),
                 ("Estimated scoring time", _format_duration(int((projected_openai_calls / max(1, pending_verify_run["openai_workers"])) * 4.0))),
             ],
         )

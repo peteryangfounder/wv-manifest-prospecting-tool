@@ -520,7 +520,7 @@ def score_enriched_candidates(
     estimated_cost_usd = 0.0
     retry_attempts = 0
     provider_attempts = 0
-    workers = _bounded_worker_count(settings, "openai_concurrency", 6, len(companies))
+    workers = _bounded_worker_count(settings, "openai_concurrency", 48, len(companies))
     commit_interval = _commit_interval(settings)
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -648,7 +648,12 @@ def _score_company_with_openai(settings: Settings, company: dict[str, Any]) -> d
     try:
         score, attempts, retries = _call_provider_with_retries(
             settings,
-            lambda: classify_with_openai(company, settings.openai_api_key or "", settings.openai_model),
+            lambda: classify_with_openai(
+                company,
+                settings.openai_api_key or "",
+                settings.openai_model,
+                max(1, _setting_int(settings, "openai_max_completion_tokens", 500)),
+            ),
         )
         usage = (score.get("raw_json") or {}).get("usage") or {}
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
@@ -805,7 +810,12 @@ def _score_one_company(
         }
 
     try:
-        score = classify_with_openai(company, settings.openai_api_key, settings.openai_model)
+        score = classify_with_openai(
+            company,
+            settings.openai_api_key,
+            settings.openai_model,
+            max(1, _setting_int(settings, "openai_max_completion_tokens", 500)),
+        )
         usage = (score.get("raw_json") or {}).get("usage") or {}
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
         completion_tokens = int(usage.get("completion_tokens") or 0)

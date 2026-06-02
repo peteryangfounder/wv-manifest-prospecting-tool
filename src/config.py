@@ -77,7 +77,8 @@ class Settings:
     openai_output_cost_per_1m_tokens: float
     tavily_cost_per_call_usd: float
     tavily_concurrency: int = 48
-    openai_concurrency: int = 6
+    openai_concurrency: int = 48
+    openai_max_completion_tokens: int = 500
     homepage_concurrency: int = 96
     db_commit_batch_size: int = 25
     provider_max_retries: int = 4
@@ -111,7 +112,8 @@ def get_settings() -> Settings:
         max_enrich=_env_int("MAX_ENRICH", 75),
         max_score=_env_int("MAX_SCORE", 75),
         tavily_concurrency=_env_int("TAVILY_CONCURRENCY", 48),
-        openai_concurrency=_env_int("OPENAI_CONCURRENCY", 6),
+        openai_concurrency=_env_int("OPENAI_CONCURRENCY", 48),
+        openai_max_completion_tokens=_env_int("OPENAI_MAX_COMPLETION_TOKENS", 500),
         homepage_concurrency=_env_int("HOMEPAGE_CONCURRENCY", 96),
         db_commit_batch_size=_env_int("DB_COMMIT_BATCH_SIZE", 25),
         provider_max_retries=_env_int("PROVIDER_MAX_RETRIES", 4),

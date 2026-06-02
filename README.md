@@ -53,7 +53,8 @@ OPENAI_MODEL=gpt-4o-mini
 MAX_ENRICH=75
 MAX_SCORE=75
 TAVILY_CONCURRENCY=48
-OPENAI_CONCURRENCY=6
+OPENAI_CONCURRENCY=48
+OPENAI_MAX_COMPLETION_TOKENS=500
 DB_COMMIT_BATCH_SIZE=25
 PROVIDER_MAX_RETRIES=4
 PROVIDER_BACKOFF_INITIAL_SECONDS=1.0
@@ -125,7 +126,7 @@ python scripts/run_pipeline.py --score --max-score 25
 
 `src/db.py` stores companies, enrichments, scores, and run metadata. The dashboard uses that run metadata for API-call counts, tokens, cache hits, and estimated spend.
 
-The enrichment and scoring stages run provider requests concurrently while keeping SQLite writes on the main thread. `TAVILY_CONCURRENCY` and `OPENAI_CONCURRENCY` control the number of simultaneous provider requests. This turns the slowest parts of the workflow from one-company-at-a-time waiting into parallel I/O while preserving deterministic database writes. The worker counts improve throughput but do not change the number of provider calls; the dashboard batch size, high-priority queue, and cache reuse remain the primary cost controls. If Tavily rate-limits the run, lower `TAVILY_CONCURRENCY`. `DB_COMMIT_BATCH_SIZE` controls how often completed results are committed during a run.
+The enrichment and scoring stages run provider requests concurrently while keeping SQLite writes on the main thread. `TAVILY_CONCURRENCY` and `OPENAI_CONCURRENCY` control the number of simultaneous provider requests. This turns the slowest parts of the workflow from one-company-at-a-time waiting into parallel I/O while preserving deterministic database writes. The worker counts improve throughput but do not change the number of provider calls; the dashboard batch size, high-priority queue, and cache reuse remain the primary cost controls. If Tavily or OpenAI rate-limits the run, lower the matching concurrency value. `OPENAI_MAX_COMPLETION_TOKENS` caps each scoring response so output-token cost cannot run away. `DB_COMMIT_BATCH_SIZE` controls how often completed results are committed during a run.
 
 The bounded homepage evidence pass runs before Tavily. `HOMEPAGE_EVIDENCE_MAX_PER_RUN` caps how many companies receive this near-free metadata check in one Streamlit run. `HOMEPAGE_FETCH_TIMEOUT_SECONDS` and `HOMEPAGE_FETCH_MAX_BYTES` keep network calls bounded. Homepage evidence that is strong enough creates a cached `homepage` enrichment record so OpenAI can score compact homepage evidence without a Tavily call. Weak, missing, or contradictory homepage evidence routes the company to Tavily instead of excluding it.
 

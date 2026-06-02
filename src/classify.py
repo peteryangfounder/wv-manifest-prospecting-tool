@@ -91,7 +91,12 @@ def build_user_prompt(company: dict[str, Any]) -> str:
     )
 
 
-def classify_with_openai(company: dict[str, Any], api_key: str, model: str) -> dict[str, Any]:
+def classify_with_openai(
+    company: dict[str, Any],
+    api_key: str,
+    model: str,
+    max_completion_tokens: int = 500,
+) -> dict[str, Any]:
     client = OpenAI(api_key=api_key)
     response = client.chat.completions.create(
         model=model,
@@ -101,6 +106,7 @@ def classify_with_openai(company: dict[str, Any], api_key: str, model: str) -> d
         ],
         response_format={"type": "json_object"},
         temperature=0.1,
+        max_tokens=max_completion_tokens,
     )
     raw_content = response.choices[0].message.content or "{}"
     payload = json.loads(raw_content)
