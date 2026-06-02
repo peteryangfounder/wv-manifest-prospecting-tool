@@ -92,8 +92,8 @@ DISPLAY_LABELS = {
     "technology": "Technology",
     "traction_signal": "Traction signal",
     "university_government_nonprofit": "University, government, or nonprofit",
-    "unknown": "Needs source details",
-    "unknown_needs_enrichment": "Needs source details",
+    "unknown": "Needs review",
+    "unknown_needs_enrichment": "Needs review",
     "venture_backability": "Venture backability",
     "warehouse_automation": "Warehouse automation",
     "wittington_edge": "Wittington edge",
@@ -1299,7 +1299,7 @@ def _route_examples_html(examples: list[dict], empty_message: str = "No cached e
             f"<div class='route-meta'>Positive: {_signal_pills(positives, 'None')}</div>"
             f"<div class='route-meta'>Negative: {_signal_pills(negatives, 'None')}</div>"
             f"<div class='route-snippet'>{html.escape(_clean_ui_text(_truncate(example.get('evidence_text') or example.get('fetch_error') or 'No homepage metadata available.', 220)))}</div>"
-            f"<div class='route-meta'>Decision reason: {html.escape(_clean_ui_text(example.get('route_reason') or 'No routing reason recorded.'))}</div>"
+            f"<div class='route-meta'>Status note: {html.escape(_clean_ui_text(example.get('route_reason') or 'No status note recorded.'))}</div>"
             "</div>"
         )
     body.append("</div>")
@@ -1439,13 +1439,13 @@ def _render_guided_steps(metrics: dict) -> None:
         _step_row(
             2,
             "Verify prospects",
-            "Preview homepage metadata first. Use paid search and AI only after confirmation.",
+            "Check homepage metadata first. Run search and scoring after approval.",
             "Done" if stage > 2 else "Active" if stage == 2 else "Locked",
         ),
         _step_row(
             3,
             "Review results",
-            "Review ranked prospects, source details, and CSV exports.",
+            "Review ranked prospects and exports.",
             "Active" if stage == 3 else "Locked",
         ),
     ]
@@ -1926,7 +1926,7 @@ def _render_workflow(metrics: dict) -> None:
                 else "Load and classify the attendee file"
             ),
             prospect_caption=(
-                f"{_format_int(metrics.get('openai_scored'))} companies scored with source details"
+                f"{_format_int(metrics.get('openai_scored'))} companies scored"
                 if has_verified
                 else "Enrich and score a capped batch"
             ),
@@ -2128,9 +2128,9 @@ cascade_rows = []
 if pending_verify_run:
     projected_rows = [
         ("Companies in this run", _format_int(pending_verify_run["cap"])),
-        ("Candidate universe", f"{_format_int(broad_universe_pending)} of {_format_int(unique_universe_pending)} unique names"),
+        ("Eligible companies", f"{_format_int(broad_universe_pending)} of {_format_int(unique_universe_pending)} unique names"),
         ("Search calls", _format_int(pending_verify_run["projected_tavily_calls"])),
-        ("AI scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
+        ("Scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
         ("OpenAI tokens", f"{_format_int(pending_verify_run['projected_prompt_tokens'])} input, {_format_int(pending_verify_run['projected_completion_tokens'])} output"),
         ("Estimated provider cost", _format_currency(pending_verify_run["projected_total"])),
         ("Estimated run time", _format_duration(int(pending_verify_run["estimated_seconds"]))),
@@ -2146,19 +2146,19 @@ if pending_verify_run:
         ("API-eligible companies", _format_int(pending_verify_run.get("api_eligible_companies") or broad_universe_pending)),
         ("Homepages checked", _format_int(pending_verify_run.get("homepage_attempted") or 0)),
         ("Metadata enough", _format_int(pending_verify_run.get("cached_homepage_ready") or 0)),
-        ("Search calls avoided", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
-        ("Needs search", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
-        ("Data gaps", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
+        ("Ready from homepage", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
+        ("Queued for search", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
+        ("Missing data", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
     ]
 
 slides = [
-    {"key": "overview", "label": "Overview", "title": "One clear venture-sourcing pipeline.", "copy": "Start with the Manifest attendee list. Remove obvious non-prospects. Read homepage metadata. Use paid search only when needed. Score and rank the best prospects."},
-    {"key": "source", "label": "Step 1", "title": "Start with the raw Manifest list.", "copy": "Load attendee company names, clean duplicates, and remove rows that are clearly not venture prospects before any paid API runs."},
-    {"key": "homepage", "label": "Step 2", "title": "Read homepage metadata before paid search.", "copy": "The app checks domains, page titles, descriptions, headings, and short homepage text so companies are not judged by name alone."},
-    {"key": "estimate", "label": "Step 3", "title": "Confirm spend before paid search and AI.", "copy": "Before provider calls start, the app shows projected search calls, OpenAI scoring calls, tokens, runtime, and provider cost."},
-    {"key": "cost", "label": "Step 4", "title": "Track actual cost and resource use.", "copy": "The billing view separates live provider-billed cost from internal token-rate estimates and included Tavily credits."},
-    {"key": "prospects", "label": "Step 5", "title": "Review ranked prospects.", "copy": "Prospect cards show score, source details, homepage signals, and open questions."},
-    {"key": "routing", "label": "Step 6", "title": "See how homepage metadata reduced paid search.", "copy": "The final screen shows homepage checks, rows that still need search, data gaps, and search calls avoided."},
+    {"key": "overview", "label": "Overview", "title": "Manifest list to ranked prospects.", "copy": "Clean the attendee list, check company pages, search the web where needed, then score the companies for review."},
+    {"key": "source", "label": "Step 1", "title": "Prepare the Manifest list.", "copy": "Load attendee company names, merge duplicates, and remove rows outside the venture pipeline."},
+    {"key": "homepage", "label": "Step 2", "title": "Check company pages.", "copy": "Read domains, page titles, descriptions, headings, and short homepage text before web search."},
+    {"key": "estimate", "label": "Step 3", "title": "Approve the run.", "copy": "Review the batch size, search volume, scoring volume, runtime, tokens, and estimated cost."},
+    {"key": "cost", "label": "Step 4", "title": "Track spend.", "copy": "View provider billing, included Tavily credits, and local token estimates separately."},
+    {"key": "prospects", "label": "Step 5", "title": "Review prospects.", "copy": "Sort the scored companies by fit and inspect the company page or search results behind each score."},
+    {"key": "routing", "label": "Step 6", "title": "Review data coverage.", "copy": "See which companies were ready from homepage metadata and which still need web search."},
 ]
 slide_count = len(slides)
 slide_index = int(st.session_state.get("slide_index", 0))
@@ -2170,7 +2170,7 @@ st.markdown(
     """
     <div class="wv-header">
       <h1 class="wv-title">Manifest Prospecting Tool</h1>
-      <p class="wv-subtitle">A focused walkthrough of the Manifest-to-prospect pipeline.</p>
+      <p class="wv-subtitle">Company sourcing for Wittington Ventures.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -2181,12 +2181,12 @@ _render_slide_header(slide["label"], slide["title"], slide["copy"])
 if slide["key"] == "overview":
     _render_flow_steps(
         [
-            ("Source", "Manifest companies are cleaned and deduplicated."),
-            ("Screen", "Obvious non-prospects are removed without paid APIs."),
-            ("Homepage metadata", "Domains, titles, descriptions, and snippets are checked first."),
-            ("Paid search", "Tavily runs only when homepage metadata is missing or unclear."),
-            ("AI score", "OpenAI scores compact source details, not raw names."),
-            ("Report", "Prospects and provider costs are shown separately."),
+            ("Source", "Load and deduplicate Manifest companies."),
+            ("Screen", "Remove rows outside the venture pipeline."),
+            ("Company page", "Read domains, titles, descriptions, and snippets."),
+            ("Web search", "Use Tavily for companies that need more context."),
+            ("Score", "Score each company against the sourcing thesis."),
+            ("Review", "Show ranked prospects and spend."),
         ],
     )
 elif slide["key"] == "source":
@@ -2195,16 +2195,16 @@ elif slide["key"] == "source":
             ("Raw rows", _format_int(metrics["raw_companies"])),
             ("Unique names", _format_int(metrics["unique_companies"])),
             ("API-eligible", _format_int(candidate_count)),
-            ("No paid APIs", "$0.0000"),
+            ("Provider cost", "$0.0000"),
         ]
     )
     _render_summary_card(
         "First screen",
         [
             ("Input", "Public Manifest attendee list"),
-            ("Cleaning", "Normalize names and remove duplicate entries"),
-            ("Filtering", "Remove obvious incumbents, investors, associations, services, and noisy rows"),
-            ("Result", f"{_format_int(candidate_count)} companies remain eligible for homepage metadata and search"),
+            ("Cleaned list", "Names normalized and duplicates merged"),
+            ("Removed", "Incumbents, investors, associations, service firms, and noisy rows"),
+            ("Next queue", f"{_format_int(candidate_count)} companies ready for page checks and search"),
         ],
     )
     if workflow_stage == 1 and st.button("Load and screen Manifest list", type="primary", use_container_width=True):
@@ -2213,22 +2213,22 @@ elif slide["key"] == "source":
 elif slide["key"] == "homepage":
     _render_mini_metrics(
         [
-            ("Homepages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
-            ("Metadata enough", _format_int(cascade_summary.get("score_from_homepage") or 0)),
-            ("Needs search", _format_int(cascade_summary.get("needs_tavily") or 0)),
-            ("Data gaps", _format_int(cascade_summary.get("data_gaps") or 0)),
+            ("Company pages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
+            ("Ready from page", _format_int(cascade_summary.get("score_from_homepage") or 0)),
+            ("Queued for search", _format_int(cascade_summary.get("needs_tavily") or 0)),
+            ("Missing data", _format_int(cascade_summary.get("data_gaps") or 0)),
         ]
     )
     _render_summary_card(
-        "Why this matters",
+        "Page check",
         [
-            ("Avoids name-only judgment", "The app reads domains, page metadata, snippets, and routing reasons."),
-            ("Reduces paid search", f"{_format_int(tavily_avoided)} search calls avoided so far."),
-            ("Protects recall", "Unclear homepage metadata routes to search instead of becoming a hard rejection."),
+            ("Reads", "Domains, page titles, descriptions, headings, and snippets"),
+            ("Ready from page", f"{_format_int(tavily_avoided)} companies"),
+            ("Next", "Companies with thin page data move to web search"),
         ],
     )
-    if pending_verify_run and st.button("Preview homepage metadata - no paid APIs", type="primary", use_container_width=True):
-        with st.spinner("Reading bounded homepage and domain metadata without paid provider calls..."):
+    if pending_verify_run and st.button("Check one company page", type="primary", use_container_width=True):
+        with st.spinner("Checking company page metadata..."):
             run_deterministic_classification(conn)
             preview_cap = max(1, min(int(pending_verify_run["cap"]), _setting_int(runtime_settings, "homepage_preview_max_per_click", 1)))
             preview_settings = replace(
@@ -2245,7 +2245,7 @@ elif slide["key"] == "homepage":
                 max_domain_attempts=1,
             )
         st.session_state["last_action"] = {
-            "message": f"Homepage metadata preview checked {_format_int(preview_result.counts.get('processed'))} sample company. No Tavily or OpenAI calls were made.",
+            "message": f"Checked {_format_int(preview_result.counts.get('processed'))} company page. Search and scoring were not run.",
             "level": "success",
         }
         st.rerun()
@@ -2255,25 +2255,25 @@ elif slide["key"] == "estimate":
             [
                 ("Companies", _format_int(pending_verify_run["cap"])),
                 ("Search calls", _format_int(pending_verify_run["projected_tavily_calls"])),
-                ("AI calls", _format_int(pending_verify_run["projected_openai_calls"])),
+                ("Scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
                 ("Estimated cost", _format_currency(pending_verify_run["projected_total"])),
             ]
         )
-        _render_summary_card("Before paid calls", projected_rows)
-        _render_summary_card("Homepage-to-search routing", cascade_rows)
-        if st.button("Confirm paid search and AI run", type="primary", use_container_width=True):
+        _render_summary_card("Run estimate", projected_rows)
+        _render_summary_card("Company page status", cascade_rows)
+        if st.button("Run search and scoring", type="primary", use_container_width=True):
             st.session_state["active_verify_mode"] = pending_mode
             st.session_state["start_paid_run_requested"] = True
             st.rerun()
     else:
-        st.warning("Load the Manifest list before estimating paid search and AI usage.")
+        st.warning("Load the Manifest list before estimating search and scoring.")
 elif slide["key"] == "cost":
     _render_mini_metrics(
         [
             ("Actual billed cost", _format_billed_total(provider_spend)),
             ("OpenAI tokens", _format_int(int(run_totals.get("total_tokens") or 0))),
             ("Search credits used", _format_int(tavily_billing.credits_used)),
-            ("Search calls avoided", _format_int(tavily_avoided)),
+            ("Ready from company pages", _format_int(tavily_avoided)),
         ]
     )
     _render_cost_hero(
@@ -2291,19 +2291,17 @@ elif slide["key"] == "cost":
 elif slide["key"] == "prospects":
     _render_prospect_cards(
         prospects.head(5),
-        "No AI-scored prospects yet. Run the homepage-to-search pipeline first.",
+        "No scored prospects yet. Run search and scoring first.",
     )
 elif slide["key"] == "routing":
     _render_summary_card(
-        "Homepage-to-search path",
+        "Data coverage",
         [
             ("API-eligible companies", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
-            ("Homepages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
-            ("Metadata enough to skip search", _format_int(cascade_summary.get("score_from_homepage") or 0)),
-            ("Still needs paid search", _format_int(cascade_summary.get("needs_tavily") or 0)),
-            ("Data gaps", _format_int(cascade_summary.get("data_gaps") or 0)),
-            ("Search calls avoided", _format_int(tavily_avoided)),
-            ("Estimated search cost saved", _format_currency(tavily_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0))),
+            ("Company pages checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
+            ("Ready from company page", _format_int(cascade_summary.get("score_from_homepage") or 0)),
+            ("Queued for web search", _format_int(cascade_summary.get("needs_tavily") or 0)),
+            ("Missing data", _format_int(cascade_summary.get("data_gaps") or 0)),
         ],
     )
 
