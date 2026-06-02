@@ -1092,10 +1092,40 @@ CUSTOM_CSS = """
 
 
 def _connect():
-    settings = get_settings()
+    settings = _settings_with_streamlit_secrets(get_settings())
     conn = db.connect(settings.database_path)
     db.init_db(conn)
     return settings, conn
+
+
+def _settings_with_streamlit_secrets(settings):
+    def secret(name: str):
+        try:
+            value = st.secrets.get(name)
+        except Exception:
+            return None
+        return value if value not in (None, "") else None
+
+    def secret_bool(name: str):
+        value = secret(name)
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+    updates = {}
+    for field_name, secret_name in [
+        ("openai_api_key", "OPENAI_API_KEY"),
+        ("openai_admin_key", "OPENAI_ADMIN_KEY"),
+        ("tavily_api_key", "TAVILY_API_KEY"),
+    ]:
+        value = secret(secret_name)
+        if value:
+            updates[field_name] = str(value)
+    payg_enabled = secret_bool("TAVILY_PAY_AS_YOU_GO_ENABLED")
+    updates["tavily_pay_as_you_go_enabled"] = True if payg_enabled is None else payg_enabled
+    return replace(settings, **updates) if updates else settings
 
 
 def _json_list(value) -> list[str]:
@@ -1569,6 +1599,11 @@ def _render_cost_hero(
     last_run_local_openai_estimate: float,
     model_name: str,
 ) -> None:
+    tavily_plan_status = (
+        f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"
+        if tavily_billing.is_live
+        else f"{tavily_billing.plan_name}, pay-as-you-go fallback {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"
+    )
     cost_items = [
         ("OpenAI API + Tavily Search API + Streamlit Cloud hosting billed cost", _format_billed_total(provider_spend)),
         (f"OpenAI API billed cost, {recent_openai_billing.window_label}", _format_openai_billed(recent_openai_billing)),
@@ -1593,7 +1628,7 @@ def _render_cost_hero(
         ("OpenAI billing cache", _cache_status(lifetime_openai_billing)),
         ("Tavily usage data source", tavily_billing.source_label),
         ("Tavily usage last fetched", tavily_billing.fetched_at_label or "Unavailable"),
-        ("Tavily Search API plan", f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"),
+        ("Tavily Search API plan", tavily_plan_status),
         ("Streamlit Cloud hosting billed cost", _format_currency(provider_spend.hosting_billed_usd)),
     ]
 
@@ -2931,6 +2966,12 @@ elif slide["key"] == "score":
 elif slide["key"] == "cost":
     footer_action_label = "Next"
     footer_action_target = "next"
+    tavily_usage_metric_label = "Tavily Search API credits used" if tavily_billing.is_live else "Tavily Search API calls recorded locally"
+    tavily_usage_metric_note = (
+        "Live from Tavily usage API."
+        if tavily_billing.is_live
+        else "Live Tavily usage is unavailable, so this is the app's local run record, not the Tavily dashboard total."
+    )
     _render_mini_metrics(
         [
             (
@@ -2944,9 +2985,9 @@ elif slide["key"] == "cost":
                 "These are prompt and output tokens used by OpenAI API scoring calls.",
             ),
             (
-                "Tavily Search API credits used",
+                tavily_usage_metric_label,
                 _format_int(tavily_billing.credits_used),
-                "Tavily counts one search request as one credit against the configured plan.",
+                tavily_usage_metric_note,
             ),
             (
                 "Scored from company pages",
