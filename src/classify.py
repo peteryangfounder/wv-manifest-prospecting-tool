@@ -56,6 +56,15 @@ def build_user_prompt(company: dict[str, Any]) -> str:
         "search_urls": _safe_json_loads(company.get("top_urls"), []),
         "search_snippets": _safe_json_loads(company.get("top_snippets"), []),
         "website": company.get("website"),
+        "evidence_source": company.get("evidence_source") or company.get("enrichment_provider") or "unknown",
+        "homepage_route": company.get("homepage_route_decision"),
+        "homepage_route_reason": company.get("homepage_route_reason"),
+        "homepage_domain": company.get("homepage_resolved_url") or company.get("homepage_candidate_domain"),
+        "homepage_domain_confidence": company.get("homepage_domain_confidence"),
+        "homepage_evidence_quality": company.get("homepage_evidence_quality"),
+        "homepage_positive_signals": _safe_json_loads(company.get("homepage_positive_signals"), []),
+        "homepage_negative_signals": _safe_json_loads(company.get("homepage_negative_signals"), []),
+        "homepage_fetch_error": company.get("homepage_fetch_error"),
     }
     return json.dumps(
         {

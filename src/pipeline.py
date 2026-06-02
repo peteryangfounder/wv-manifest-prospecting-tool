@@ -353,6 +353,9 @@ def collect_homepage_evidence(
             "homepage_score_ready": score_ready,
             "homepage_needs_tavily": needs_tavily,
             "errors": errors,
+            "tavily_call_avoided_by_homepage_evidence": score_ready,
+            "estimated_tavily_credits_saved": score_ready,
+            "estimated_tavily_cost_saved": score_ready * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0),
             "estimated_cost_usd": 0.0,
         },
     )

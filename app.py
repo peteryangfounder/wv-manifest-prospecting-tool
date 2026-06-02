@@ -645,6 +645,45 @@ CUSTOM_CSS = """
     line-height: 1.35;
     text-decoration: none;
   }
+  .route-grid {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0.5rem 0 1rem 0;
+  }
+  .route-card {
+    background: #ffffff;
+    border: 1px solid #e5e9ef;
+    border-radius: 8px;
+    padding: 0.82rem;
+  }
+  .route-kicker {
+    color: #697386;
+    font-size: 0.76rem;
+    font-weight: 760;
+    text-transform: uppercase;
+  }
+  .route-company {
+    color: #202332;
+    font-size: 0.96rem;
+    font-weight: 760;
+    line-height: 1.3;
+    margin-top: 0.12rem;
+    overflow-wrap: anywhere;
+  }
+  .route-meta {
+    color: #5d6675;
+    font-size: 0.82rem;
+    line-height: 1.38;
+    margin-top: 0.34rem;
+    overflow-wrap: anywhere;
+  }
+  .route-snippet {
+    color: #313647;
+    font-size: 0.86rem;
+    line-height: 1.42;
+    margin-top: 0.45rem;
+  }
   @media (max-width: 1100px) {
     .summary-grid {
       grid-template-columns: 1fr;
@@ -662,6 +701,9 @@ CUSTOM_CSS = """
       grid-column: 1 / -1;
     }
     .source-card {
+      grid-template-columns: 1fr;
+    }
+    .route-grid {
       grid-template-columns: 1fr;
     }
   }
@@ -744,6 +786,10 @@ def _format_money(value: int | float | None, currency: str = "usd") -> str:
     return f"{float(value or 0):,.4f} {currency_clean}"
 
 
+def _format_percent(value: int | float | None) -> str:
+    return f"{float(value or 0):.0%}"
+
+
 def _format_billed_total(spend: ProviderBilledSpend) -> str:
     if spend.is_complete:
         return _format_currency(spend.total_billed_usd)
@@ -813,6 +859,15 @@ def _tag_pills(tags: list[str] | str | None) -> str:
     return "".join(f"<span class='wv-pill'>{html.escape(_clean_ui_text(_humanize(tag)))}</span>" for tag in tags[:4])
 
 
+def _signal_pills(tags: list[str] | str | None, empty_label: str = "None") -> str:
+    if isinstance(tags, str):
+        tags = _json_list(tags)
+    tags = tags or []
+    if not tags:
+        return f"<span class='wv-pill'>{html.escape(empty_label)}</span>"
+    return "".join(f"<span class='wv-pill'>{html.escape(_clean_ui_text(str(tag)))}</span>" for tag in tags[:5])
+
+
 def _safe_link(url: str | None, label: str) -> str:
     clean_url = (url or "").strip()
     safe_label = html.escape(label)
@@ -838,11 +893,21 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
         return pd.DataFrame()
 
     frame = pd.DataFrame(rows)
-    for column in ["sector_tags", "deterministic_tags", "top_titles", "top_urls", "top_snippets"]:
+    for column in [
+        "sector_tags",
+        "deterministic_tags",
+        "top_titles",
+        "top_urls",
+        "top_snippets",
+        "homepage_positive_signals",
+        "homepage_negative_signals",
+    ]:
         if column in frame.columns:
             frame[column] = frame[column].apply(_json_list)
 
     frame["sector_tags_text"] = frame.get("sector_tags", pd.Series(dtype=object)).apply(lambda tags: ", ".join(tags or []))
+    frame["homepage_positive_signals_text"] = frame.get("homepage_positive_signals", pd.Series(dtype=object)).apply(lambda tags: ", ".join(tags or []))
+    frame["homepage_negative_signals_text"] = frame.get("homepage_negative_signals", pd.Series(dtype=object)).apply(lambda tags: ", ".join(tags or []))
     frame["source_urls"] = frame.get("top_urls", pd.Series(dtype=object)).apply(lambda urls: "\n".join(urls or []))
     frame["primary_source_url"] = frame.get("top_urls", pd.Series(dtype=object)).apply(lambda urls: urls[0] if urls else "")
     frame["total_score"] = frame["total_score"].fillna(0).astype(int)
@@ -853,6 +918,19 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     frame["confidence"] = frame["confidence"].fillna("low")
     frame["rationale"] = frame["rationale"].fillna("")
     frame["evidence_summary"] = frame["evidence_summary"].fillna("")
+    frame["evidence_source"] = frame.get("evidence_source", pd.Series(dtype=object)).fillna("none")
+    frame["evidence_source_display"] = frame["evidence_source"].apply(_humanize)
+    frame["homepage_route_decision"] = frame.get("homepage_route_decision", pd.Series(dtype=object)).fillna("")
+    frame["homepage_route_reason"] = frame.get("homepage_route_reason", pd.Series(dtype=object)).fillna("")
+    frame["homepage_domain_status"] = frame.get("homepage_domain_status", pd.Series(dtype=object)).fillna("")
+    frame["homepage_domain_confidence"] = pd.to_numeric(
+        frame.get("homepage_domain_confidence", pd.Series(dtype=float)), errors="coerce"
+    ).fillna(0.0)
+    frame["homepage_evidence_quality"] = pd.to_numeric(
+        frame.get("homepage_evidence_quality", pd.Series(dtype=float)), errors="coerce"
+    ).fillna(0.0)
+    frame["homepage_evidence_text"] = frame.get("homepage_evidence_text", pd.Series(dtype=object)).fillna("")
+    frame["homepage_fetch_error"] = frame.get("homepage_fetch_error", pd.Series(dtype=object)).fillna("")
     frame["score_provider"] = frame["score_provider"].fillna("none")
     frame["is_api_verified"] = frame["score_provider"].eq("openai")
     frame["is_refined_prospect"] = (
@@ -881,6 +959,7 @@ def _rows_to_frame(rows: list[dict]) -> pd.DataFrame:
         frame.loc[placeholder_mask, "rationale"] = "Filtered out, generic placeholder entry rather than a named company."
     frame["rationale_preview"] = frame["rationale"].apply(lambda value: _clean_ui_text(_truncate(value, 140)))
     frame["evidence_preview"] = frame["evidence_summary"].apply(lambda value: _clean_ui_text(_truncate(value, 180)))
+    frame["support_preview"] = frame["homepage_evidence_text"].apply(lambda value: _clean_ui_text(_truncate(value, 170)))
     return frame.sort_values(["total_score", "canonical_name"], ascending=[False, True]).reset_index(drop=True)
 
 
@@ -931,6 +1010,51 @@ def _render_summary_card(title: str, rows: list[tuple[str, str]]) -> None:
         )
     body.append("</div>")
     st.markdown("".join(body), unsafe_allow_html=True)
+
+
+def _route_examples_html(examples: list[dict], empty_message: str = "No cached examples yet.") -> str:
+    if not examples:
+        return f"<div class='empty-state'>{html.escape(empty_message)}</div>"
+    body = ["<div class='route-grid'>"]
+    for example in examples:
+        positives = _json_list(example.get("positive_signals"))
+        negatives = _json_list(example.get("negative_signals"))
+        domain = example.get("resolved_url") or example.get("candidate_domain") or "No resolved domain"
+        confidence = float(example.get("domain_confidence") or 0.0)
+        quality = float(example.get("evidence_quality") or 0.0)
+        body.append(
+            "<div class='route-card'>"
+            f"<div class='route-kicker'>{html.escape(_clean_ui_text(_humanize(example.get('route_decision') or 'unrouted')))}</div>"
+            f"<div class='route-company'>{html.escape(_clean_ui_text(example.get('canonical_name')))}</div>"
+            f"<div class='route-meta'>Domain: {html.escape(_clean_ui_text(domain))}</div>"
+            f"<div class='route-meta'>Confidence: {_format_percent(confidence)} domain, {_format_percent(quality)} evidence</div>"
+            f"<div class='route-meta'>Positive: {_signal_pills(positives, 'None')}</div>"
+            f"<div class='route-meta'>Negative: {_signal_pills(negatives, 'None')}</div>"
+            f"<div class='route-snippet'>{html.escape(_clean_ui_text(_truncate(example.get('evidence_text') or example.get('fetch_error') or 'No homepage snippet available.', 220)))}</div>"
+            f"<div class='route-meta'>Why: {html.escape(_clean_ui_text(example.get('route_reason') or 'No route reason recorded.'))}</div>"
+            "</div>"
+        )
+    body.append("</div>")
+    return "".join(body)
+
+
+def _render_route_examples(title: str, examples: list[dict], empty_message: str = "No cached examples yet.") -> None:
+    st.markdown(f"<div class='section-label'>{html.escape(_clean_ui_text(title))}</div>", unsafe_allow_html=True)
+    st.markdown(_route_examples_html(examples, empty_message), unsafe_allow_html=True)
+
+
+def _audit_sample_frame(samples: list[dict]) -> pd.DataFrame:
+    if not samples:
+        return pd.DataFrame()
+    frame = pd.DataFrame(samples)
+    for column in ["positive_signals", "negative_signals"]:
+        if column in frame.columns:
+            frame[column] = frame[column].apply(lambda value: ", ".join(_json_list(value)))
+    frame["domain_confidence"] = pd.to_numeric(frame.get("domain_confidence", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+    frame["domain_confidence_display"] = frame["domain_confidence"].apply(_format_percent)
+    frame["evidence_text"] = frame.get("evidence_text", pd.Series(dtype=object)).fillna("")
+    frame["evidence_snippet"] = frame["evidence_text"].apply(lambda value: _clean_ui_text(_truncate(value, 140)))
+    return frame
 
 
 def _render_cost_hero(
@@ -1181,6 +1305,9 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> 
     projected_tavily_bill = max(0.0, tavily_after.actual_billed_usd - tavily_before.actual_billed_usd)
     projected_tavily_overage = max(0, int(tavily_after.overage_credits) - int(tavily_before.overage_credits))
     projected_tavily_payg_if_enabled = projected_tavily_overage * max(0.0, float(tavily_payg_price or 0.0))
+    tavily_calls_avoided = int(homepage_summary.get("score_from_homepage", 0))
+    estimated_tavily_credits_saved = tavily_calls_avoided
+    estimated_tavily_cost_saved = tavily_calls_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0)
     projected_total = projected_tavily_bill + projected_openai_estimate
 
     tavily_workers = max(1, min(_setting_int(settings, "tavily_concurrency", 12), max(1, projected_tavily_calls)))
@@ -1193,11 +1320,20 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> 
         "cap": cap,
         "mode": mode,
         "projected_homepage_candidates": len(homepage_candidates),
+        "api_eligible_companies": homepage_summary.get("api_eligible", 0),
+        "homepage_attempted": homepage_summary.get("homepage_attempted", 0),
+        "accepted_domains": homepage_summary.get("accepted_domains", 0),
+        "provisional_domains": homepage_summary.get("provisional_domains", 0),
+        "unresolved_domains": homepage_summary.get("unresolved_domains", 0),
         "cached_resolved_domains": homepage_summary.get("resolved_domains", 0),
         "cached_homepage_ready": homepage_summary.get("score_from_homepage", 0),
         "cached_tavily_needed": homepage_summary.get("needs_tavily", 0),
         "cached_tavily_skipped": homepage_summary.get("score_from_homepage", 0),
         "cached_homepage_data_gaps": homepage_summary.get("data_gaps", 0),
+        "cached_homepage_soft_excluded": homepage_summary.get("soft_excluded", 0),
+        "tavily_call_avoided_by_homepage_evidence": tavily_calls_avoided,
+        "estimated_tavily_credits_saved": estimated_tavily_credits_saved,
+        "estimated_tavily_cost_saved": estimated_tavily_cost_saved,
         "projected_tavily_calls": projected_tavily_calls,
         "projected_openai_calls": projected_openai_calls,
         "high_signal_candidates": high_signal_candidates,
@@ -1407,11 +1543,23 @@ def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
     for _, row in frame.iterrows():
         score = int(row.get("weighted_score") or 0)
         rank = int(row.get("rank") or 0)
+        evidence_source = _humanize(row.get("evidence_source") or "none")
+        source_url = row.get("homepage_resolved_url") or row.get("website") or row.get("primary_source_url") or ""
+        snippets = row.get("top_snippets") or []
+        support_snippet = row.get("support_preview") or (snippets[0] if snippets else "")
+        support_snippet = _clean_ui_text(_truncate(support_snippet or row.get("evidence_summary") or "No evidence snippet available.", 160))
+        evidence_confidence = (
+            _format_percent(float(row.get("homepage_evidence_quality") or 0.0))
+            if float(row.get("homepage_evidence_quality") or 0.0) > 0
+            else _humanize(row.get("confidence") or "low")
+        )
         body.append(
             "<div class='prospect-card'>"
             "<div class='prospect-main'>"
             f"<div class='prospect-rank'>Rank {rank}</div>"
             f"<div class='prospect-name'>{html.escape(_clean_ui_text(row.get('canonical_name')))}</div>"
+            f"<div class='route-meta'>Evidence source: {html.escape(evidence_source)}</div>"
+            f"<div class='route-meta'>Source URL: {_safe_link(str(source_url or ''), 'Open') if source_url else 'None'}</div>"
             "</div>"
             "<div class='prospect-score'>"
             "<div class='prospect-score-label'>Fit score</div>"
@@ -1423,7 +1571,13 @@ def _prospect_cards_html(frame: pd.DataFrame, empty_message: str) -> str:
             "</div>"
             f"<div class='prospect-tags'>{_tag_pills(row.get('sector_tags'))}</div>"
             "</div>"
-            f"<div class='prospect-evidence'>{html.escape(_clean_ui_text(row.get('evidence_summary') or 'No external evidence yet.'))}</div>"
+            "<div class='prospect-evidence'>"
+            f"<strong>Support:</strong> {html.escape(support_snippet)}"
+            f"<div class='route-meta'>Positive: {_signal_pills(row.get('homepage_positive_signals'), 'Not captured')}</div>"
+            f"<div class='route-meta'>Negative: {_signal_pills(row.get('homepage_negative_signals'), 'Not captured')}</div>"
+            f"<div class='route-meta'>Evidence confidence: {html.escape(_clean_ui_text(evidence_confidence))}</div>"
+            f"<div class='route-meta'>Uncertainty: {html.escape(_clean_ui_text(row.get('homepage_route_reason') or row.get('evidence_summary') or 'No data-gap reason recorded.'))}</div>"
+            "</div>"
             "</div>"
         )
     body.append("</div>")
@@ -1724,12 +1878,6 @@ if pending_verify_run and run_step != "source":
             "Candidate universe",
             f"{_format_int(broad_universe_pending)} API-eligible of {_format_int(unique_universe_pending)} unique",
         ),
-        ("Domain discovery candidates", _format_int(pending_verify_run.get("projected_homepage_candidates") or 0)),
-        ("Cached resolved domains", _format_int(pending_verify_run.get("cached_resolved_domains") or 0)),
-        ("Homepage evidence-ready", _format_int(pending_verify_run.get("cached_homepage_ready") or 0)),
-        ("Tavily-needed from cache", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
-        ("Tavily skipped by homepage evidence", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
-        ("Homepage data gaps", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
         ("Uncached Tavily calls", _format_int(pending_verify_run["projected_tavily_calls"])),
         ("Projected OpenAI scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
         (
@@ -1778,6 +1926,68 @@ if pending_verify_run and run_step != "source":
         "Projected usage before starting",
         projected_rows,
     )
+    cascade_rows = [
+        ("API-eligible companies", _format_int(pending_verify_run.get("api_eligible_companies") or broad_universe_pending)),
+        ("Homepage/domain attempted", _format_int(pending_verify_run.get("homepage_attempted") or 0)),
+        ("Domain discovery candidates for next run", _format_int(pending_verify_run.get("projected_homepage_candidates") or 0)),
+        ("Accepted domains", _format_int(pending_verify_run.get("accepted_domains") or 0)),
+        ("Provisional domains", _format_int(pending_verify_run.get("provisional_domains") or 0)),
+        ("Unresolved domains", _format_int(pending_verify_run.get("unresolved_domains") or 0)),
+        ("Homepage-positive companies", _format_int(pending_verify_run.get("cached_homepage_ready") or 0)),
+        ("Homepage-negative or soft-excluded", _format_int(pending_verify_run.get("cached_homepage_soft_excluded") or 0)),
+        ("Unclear or data-gap companies", _format_int(pending_verify_run.get("cached_homepage_data_gaps") or 0)),
+        ("Tavily skipped by homepage evidence", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
+        ("Tavily required by missing or unclear evidence", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
+        ("Estimated paid calls avoided", _format_int(pending_verify_run.get("tavily_call_avoided_by_homepage_evidence") or 0)),
+        ("Estimated Tavily credits saved", _format_int(pending_verify_run.get("estimated_tavily_credits_saved") or 0)),
+        ("Estimated Tavily cost saved", _format_currency(pending_verify_run.get("estimated_tavily_cost_saved") or 0)),
+    ]
+    _render_summary_card("Evidence Cascade Summary", cascade_rows)
+    st.markdown(
+        "<div class='quiet-note'>Homepage/domain preview uses ordinary web requests only. It does not call Tavily or OpenAI.</div>",
+        unsafe_allow_html=True,
+    )
+    if st.button("Run homepage evidence preview only", use_container_width=True):
+        with st.spinner("Collecting bounded homepage/domain evidence without paid provider calls..."):
+            run_deterministic_classification(conn)
+            preview_result = collect_homepage_evidence(
+                conn,
+                runtime_settings,
+                int(pending_verify_run["cap"]),
+                False,
+                mode=pending_mode,
+            )
+        st.session_state["last_action"] = {
+            "message": (
+                f"Homepage preview checked {_format_int(preview_result.counts.get('processed'))} companies. "
+                "No Tavily or OpenAI calls were made."
+            ),
+            "level": "success",
+        }
+        st.session_state["pending_verify_run"] = _estimate_verify_run(
+            conn, db.metrics(conn), runtime_settings, int(pending_verify_run["cap"]), pending_mode
+        )
+        st.rerun()
+    route_tabs = st.tabs(["Homepage-positive", "Needs Tavily", "Data gaps", "Soft-exclude", "Unresolved domain"])
+    route_tab_specs = [
+        ("score_from_homepage", "Homepage-positive examples"),
+        ("needs_tavily", "Needs-Tavily examples"),
+        ("low_priority_data_gap", "Data-gap examples"),
+        ("soft_exclude", "Soft-exclude examples"),
+        (None, "Unresolved-domain examples"),
+    ]
+    for route_tab, (route_name, route_title) in zip(route_tabs, route_tab_specs):
+        with route_tab:
+            examples = (
+                [
+                    example
+                    for example in db.homepage_route_examples(conn, route=None, limit=20)
+                    if example.get("domain_status") == "unresolved"
+                ][:5]
+                if route_name is None
+                else db.homepage_route_examples(conn, route=route_name, limit=5)
+            )
+            _render_route_examples(route_title, examples)
     st.caption(
         "OpenAI cost is an internal token-rate estimate based on the selected model and recent usage. "
         "Actual OpenAI billing may differ. No Tavily or OpenAI provider calls start until you confirm."
@@ -1958,6 +2168,35 @@ with summary_cols[1]:
 if frame.empty:
     st.warning("No companies loaded yet. Use Prepare source list to load and classify the Manifest attendee file.")
 else:
+    cascade_summary = db.homepage_evidence_summary(conn, mode=verify_mode)
+    tavily_avoided = int(cascade_summary.get("score_from_homepage") or 0)
+    cascade_cols = st.columns((1, 1))
+    with cascade_cols[0]:
+        _render_summary_card(
+            "Evidence Cascade Summary",
+            [
+                ("API-eligible companies", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
+                ("Homepage/domain attempted", _format_int(cascade_summary.get("homepage_attempted") or 0)),
+                ("Accepted domains", _format_int(cascade_summary.get("accepted_domains") or 0)),
+                ("Provisional domains", _format_int(cascade_summary.get("provisional_domains") or 0)),
+                ("Unresolved domains", _format_int(cascade_summary.get("unresolved_domains") or 0)),
+                ("Homepage-positive companies", _format_int(cascade_summary.get("score_from_homepage") or 0)),
+                ("Homepage-negative or soft-excluded", _format_int(cascade_summary.get("soft_excluded") or 0)),
+                ("Unclear or data-gap companies", _format_int(cascade_summary.get("data_gaps") or 0)),
+            ],
+        )
+    with cascade_cols[1]:
+        _render_summary_card(
+            "Paid Calls Avoided",
+            [
+                ("Tavily skipped by homepage evidence", _format_int(tavily_avoided)),
+                ("Tavily required by missing or unclear evidence", _format_int(cascade_summary.get("needs_tavily") or 0)),
+                ("Estimated paid calls avoided", _format_int(tavily_avoided)),
+                ("Estimated Tavily credits saved", _format_int(tavily_avoided)),
+                ("Estimated Tavily cost saved", _format_currency(tavily_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0))),
+            ],
+        )
+
     overview_tab, source_tab, prospects_tab, detail_tab = st.tabs(
         ["Overview", "Source list", "Verified prospects", "Company detail"]
     )
@@ -1979,6 +2218,56 @@ else:
             _horizontal_bar_chart(funnel_df, "Stage", "Companies", height=320, sort=None),
             use_container_width=True,
         )
+        st.divider()
+
+        st.markdown("<div class='section-label'>Evidence route examples</div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='quiet-note'>Cached homepage/domain decisions shown here use no Tavily or OpenAI calls.</div>",
+            unsafe_allow_html=True,
+        )
+        route_cols = st.columns(2)
+        with route_cols[0]:
+            _render_route_examples(
+                "Homepage-positive",
+                db.homepage_route_examples(conn, route="score_from_homepage", limit=3),
+            )
+            _render_route_examples(
+                "Data gaps",
+                db.homepage_route_examples(conn, route="low_priority_data_gap", limit=3),
+            )
+        with route_cols[1]:
+            _render_route_examples(
+                "Needs Tavily",
+                db.homepage_route_examples(conn, route="needs_tavily", limit=3),
+            )
+            _render_route_examples(
+                "Soft-exclude",
+                db.homepage_route_examples(conn, route="soft_exclude", limit=3),
+            )
+        st.divider()
+
+        audit_frame = _audit_sample_frame(db.false_negative_audit_sample(conn, limit=12, mode=verify_mode))
+        st.markdown("<div class='section-label'>False-negative audit sample</div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='quiet-note'>Sampled uncertain or excluded rows for later recall checks. This is an audit queue, not a hard rejection list.</div>",
+            unsafe_allow_html=True,
+        )
+        if audit_frame.empty:
+            st.markdown("<div class='empty-state'>No audit samples yet. Run homepage evidence preview or a verification batch to populate this list.</div>", unsafe_allow_html=True)
+        else:
+            _render_table(
+                audit_frame,
+                [
+                    ("canonical_name", "Company", "company"),
+                    ("audit_reason", "Audit reason", "text"),
+                    ("route_decision", "Route", "label"),
+                    ("domain_confidence_display", "Domain confidence", "text"),
+                    ("positive_signals", "Positive signals", "text"),
+                    ("negative_signals", "Negative signals", "text"),
+                    ("evidence_snippet", "Evidence snippet", "text"),
+                ],
+                "No audit samples yet.",
+            )
         st.divider()
 
         st.markdown("<div class='section-label'>Fit score distribution</div>", unsafe_allow_html=True)
@@ -2085,9 +2374,17 @@ else:
                 "total_score",
                 "company_type_display",
                 "confidence_display",
+                "evidence_source_display",
                 "sector_tags_text",
                 "website",
                 "primary_source_url",
+                "homepage_resolved_url",
+                "homepage_domain_confidence",
+                "homepage_evidence_quality",
+                "homepage_positive_signals_text",
+                "homepage_negative_signals_text",
+                "homepage_route_decision",
+                "homepage_route_reason",
                 "rationale",
                 "evidence_summary",
                 "source_urls",
@@ -2100,9 +2397,17 @@ else:
                 "total_score": "Stored score",
                 "company_type_display": "Type",
                 "confidence_display": "Confidence",
+                "evidence_source_display": "Evidence source",
                 "sector_tags_text": "Sectors",
                 "website": "Website",
                 "primary_source_url": "Primary source",
+                "homepage_resolved_url": "Homepage source",
+                "homepage_domain_confidence": "Homepage domain confidence",
+                "homepage_evidence_quality": "Homepage evidence confidence",
+                "homepage_positive_signals_text": "Homepage positive signals",
+                "homepage_negative_signals_text": "Homepage negative signals",
+                "homepage_route_decision": "Homepage route",
+                "homepage_route_reason": "Homepage route reason",
                 "rationale": "Rationale",
                 "evidence_summary": "Evidence summary",
                 "source_urls": "Source URLs",
@@ -2136,6 +2441,12 @@ else:
                 f"<div class='detail-title'>{html.escape(_clean_ui_text(selected_row['canonical_name']))}</div>"
                 f"<div class='detail-text'><strong>Rationale:</strong> {html.escape(_clean_ui_text(selected_row.get('rationale') or 'No rationale yet.'))}</div>"
                 f"<div class='detail-text'><strong>Evidence:</strong> {html.escape(_clean_ui_text(selected_row.get('evidence_summary') or 'No external evidence yet.'))}</div>"
+                f"<div class='detail-text'><strong>Evidence source:</strong> {html.escape(_clean_ui_text(selected_row.get('evidence_source_display') or 'None'))}</div>"
+                f"<div class='detail-text'><strong>Homepage route:</strong> {html.escape(_clean_ui_text(_humanize(selected_row.get('homepage_route_decision') or 'not recorded')))}</div>"
+                f"<div class='detail-text'><strong>Route reason:</strong> {html.escape(_clean_ui_text(selected_row.get('homepage_route_reason') or selected_row.get('homepage_fetch_error') or 'No route reason recorded.'))}</div>"
+                f"<div class='detail-text'><strong>Positive signals:</strong> {_signal_pills(selected_row.get('homepage_positive_signals'), 'Not captured')}</div>"
+                f"<div class='detail-text'><strong>Negative signals:</strong> {_signal_pills(selected_row.get('homepage_negative_signals'), 'Not captured')}</div>"
+                f"<div class='detail-text'><strong>Evidence snippet:</strong> {html.escape(_clean_ui_text(_truncate(selected_row.get('homepage_evidence_text') or selected_row.get('evidence_summary') or 'No evidence snippet available.', 260)))}</div>"
                 "</div>",
                 unsafe_allow_html=True,
             )

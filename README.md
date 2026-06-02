@@ -173,6 +173,12 @@ The current architecture is a staged evidence cascade: deterministic exclusions,
 
 The current implementation includes the first bounded version of that cascade. It is intentionally not a broad crawler: it starts with homepage metadata only, caches results, uses conservative domain confidence, and treats network failures as data gaps rather than exclusions. The next extension should add bounded `/about`, `/product`, `/platform`, and `/solutions` fetches after the homepage-only layer is measured.
 
+## Evidence Cascade
+
+The tool does not ask AI to judge raw company names. It first uses deterministic rules only to remove obvious non-prospects and order the queue. It then attempts cheap homepage/domain evidence for API-eligible companies. If homepage evidence is strong enough, Tavily search is skipped and the company can move directly to OpenAI scoring with a compact evidence packet. If homepage evidence is missing, unclear, blocked, contradictory, or unresolved, the row escalates to Tavily rather than being hard-excluded.
+
+OpenAI scores compact evidence packets, not names. The packet includes external snippets, source URLs, homepage route decisions, route reasons, positive and negative signals, domain confidence, and data-gap context when available. The UI exposes those same route decisions, evidence snippets, evidence source labels, confidence values, and false-negative audit samples so an investor can inspect why a company was routed or ranked.
+
 ## Billing And Usage Tracking
 
 The **API usage and cost** section separates provider-billed spend from internal estimates:
@@ -213,6 +219,7 @@ The app is designed to scale from a small demo batch to thousands of attendee ro
 - Transient provider failures use bounded retry/backoff with jitter.
 - Terminal provider failures fall back to recorded error state or baseline score instead of stopping the run.
 - The confirmation step estimates cheap homepage/domain checks, cached homepage routing outcomes, uncached calls, model tokens, OpenAI token-rate cost, Tavily billed cost, total provider cost, worker counts, credits after the run, and approximate runtime before provider calls start.
+- The dashboard shows evidence cascade counts, route examples, paid Tavily calls avoided by homepage evidence, and false-negative audit samples for soft-excluded or uncertain rows.
 - Broad recall runs can include ambiguous companies after high-signal rows; the confirmation card shows the candidate mix before execution.
 - Live billing reads through `OPENAI_ADMIN_KEY` are administrative reads and are not counted as model/token spend.
 
