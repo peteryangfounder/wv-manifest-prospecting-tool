@@ -127,6 +127,21 @@ OPENAI_MODEL_PRESETS = {
     "gpt-4o-mini": {"input": 0.15, "output": 0.60},
 }
 
+VERIFY_MODE_PRESETS = {
+    "balanced": {
+        "label": "Balanced",
+        "description": "High-signal and likely-tech rows first, then ambiguous candidates within the approved cap.",
+    },
+    "precision-first": {
+        "label": "Precision-first",
+        "description": "Only likely startup or technology rows. Lower noise, higher false-negative risk.",
+    },
+    "recall-first": {
+        "label": "Recall-first",
+        "description": "Broad candidate coverage. Best for audits and large budget-approved runs.",
+    },
+}
+
 
 CUSTOM_CSS = """
 <style>
@@ -1111,9 +1126,9 @@ def _tavily_billing_from_metrics(metrics: dict, settings) -> TavilyBillingSummar
     )
 
 
-def _estimate_verify_run(conn, metrics: dict, settings, cap: int) -> dict:
-    tavily_candidates = db.candidates_for_enrichment(conn, limit=cap, force=False)
-    currently_scoreable = db.enriched_for_openai_scoring(conn, limit=cap, force=False)
+def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> dict:
+    tavily_candidates = db.candidates_for_enrichment(conn, limit=cap, force=False, mode=mode)
+    currently_scoreable = db.enriched_for_openai_scoring(conn, limit=cap, force=False, mode=mode)
     projected_tavily_calls = len(tavily_candidates)
     projected_openai_calls = min(cap, len(currently_scoreable) + projected_tavily_calls)
     high_signal_candidates = sum(1 for candidate in tavily_candidates if int(candidate.get("high_priority_enrichment") or 0) == 1)
@@ -1168,12 +1183,13 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int) -> dict:
 
     return {
         "cap": cap,
+        "mode": mode,
         "projected_tavily_calls": projected_tavily_calls,
         "projected_openai_calls": projected_openai_calls,
         "high_signal_candidates": high_signal_candidates,
         "other_likely_tech_candidates": other_likely_tech_candidates,
         "ambiguous_candidates": ambiguous_candidates,
-        "broad_candidate_universe": int(metrics.get("candidates") or 0),
+        "broad_candidate_universe": db.count_candidate_universe(conn, mode=mode),
         "unique_company_universe": int(metrics.get("unique_companies") or 0),
         "projected_prompt_tokens": projected_prompt_tokens,
         "projected_completion_tokens": projected_completion_tokens,
@@ -1603,12 +1619,15 @@ _render_guided_steps(metrics)
 selected_model = st.session_state.get("selected_openai_model", settings.openai_model)
 if selected_model not in OPENAI_MODEL_PRESETS:
     selected_model = settings.openai_model if settings.openai_model in OPENAI_MODEL_PRESETS else "gpt-4o-mini"
+verify_mode = st.session_state.get("verify_mode", "balanced")
+if verify_mode not in VERIFY_MODE_PRESETS:
+    verify_mode = "balanced"
 model_pricing = _selected_model_pricing(selected_model)
 prospect_cap = int(st.session_state.get("prospect_cap", min(settings.max_score, 100)))
 runtime_settings = _settings_for_run(settings, selected_model, model_pricing["input"], model_pricing["output"])
 
 if workflow_stage >= 2:
-    settings_cols = st.columns((1, 1, 1))
+    settings_cols = st.columns((1, 1, 1, 1.15))
     prospect_cap = settings_cols[0].number_input(
         "Companies to verify now",
         min_value=1,
@@ -1625,9 +1644,20 @@ if workflow_stage >= 2:
         key="selected_openai_model",
         help="Model name sent to OpenAI for the scoring step.",
     )
+    verify_mode_labels = [item["label"] for item in VERIFY_MODE_PRESETS.values()]
+    verify_mode_keys = list(VERIFY_MODE_PRESETS.keys())
+    selected_mode_label = settings_cols[2].selectbox(
+        "Verification mode",
+        verify_mode_labels,
+        index=verify_mode_keys.index(verify_mode),
+        key="verify_mode_label",
+        help="Controls the precision/recall posture for the API queue.",
+    )
+    verify_mode = verify_mode_keys[verify_mode_labels.index(selected_mode_label)]
+    st.session_state["verify_mode"] = verify_mode
     model_pricing = _selected_model_pricing(selected_model)
     runtime_settings = _settings_for_run(settings, selected_model, model_pricing["input"], model_pricing["output"])
-    settings_cols[2].markdown(
+    settings_cols[3].markdown(
         f"**Internal token-rate estimate**  \n"
         f"Input: `${model_pricing['input']:g}` / 1M tokens  \n"
         f"Output: `${model_pricing['output']:g}` / 1M tokens  \n"
@@ -1647,7 +1677,7 @@ if st.button(primary_label, type="primary", use_container_width=True):
     if workflow_stage == 1:
         run_step = "source"
     else:
-        st.session_state["pending_verify_run"] = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap))
+        st.session_state["pending_verify_run"] = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode)
         run_step = "confirm_verify"
 else:
     run_step = None
@@ -1664,6 +1694,8 @@ if run_step == "source":
 
 pending_verify_run = st.session_state.get("pending_verify_run")
 if pending_verify_run and run_step != "source":
+    pending_mode = pending_verify_run.get("mode") or "balanced"
+    mode_label = VERIFY_MODE_PRESETS.get(pending_mode, VERIFY_MODE_PRESETS["balanced"])["label"]
     high_signal_pending = int(pending_verify_run.get("high_signal_candidates") or 0)
     likely_tech_pending = int(pending_verify_run.get("other_likely_tech_candidates") or 0)
     ambiguous_pending = int(pending_verify_run.get("ambiguous_candidates") or 0)
@@ -1672,6 +1704,7 @@ if pending_verify_run and run_step != "source":
     projected_tavily_overage = int(pending_verify_run.get("projected_tavily_overage") or 0)
     tavily_payg_enabled_pending = bool(pending_verify_run.get("tavily_payg_enabled"))
     projected_rows = [
+        ("Mode", mode_label),
         ("Batch cap", _format_int(pending_verify_run["cap"])),
         (
             "Candidate universe",
@@ -1731,6 +1764,7 @@ if pending_verify_run and run_step != "source":
     )
     confirm_cols = st.columns((1, 1))
     if confirm_cols[0].button("Confirm and start API run", type="primary", use_container_width=True):
+        st.session_state["active_verify_mode"] = pending_mode
         run_step = "verify"
         st.session_state.pop("pending_verify_run", None)
     if confirm_cols[1].button("Cancel API run", use_container_width=True):
@@ -1739,6 +1773,7 @@ if pending_verify_run and run_step != "source":
 
 if run_step == "verify":
     cap = int(prospect_cap)
+    active_verify_mode = st.session_state.get("active_verify_mode", verify_mode)
     progress = st.progress(0, text=f"Refreshing source screening before verifying up to {cap:,} companies...")
     preview = st.empty()
     classify_result = run_deterministic_classification(conn)
@@ -1775,6 +1810,7 @@ if run_step == "verify":
         cap,
         False,
         progress_callback=enrichment_progress,
+        mode=active_verify_mode,
     )
     score_result = score_enriched_candidates(
         conn,
@@ -1782,6 +1818,7 @@ if run_step == "verify":
         cap,
         False,
         progress_callback=scoring_progress,
+        mode=active_verify_mode,
     )
     progress.progress(1.0, text="Verification run finished.")
     level = "warning" if enrich_result.counts.get("errors") or score_result.counts.get("errors") else "success"
@@ -1790,12 +1827,13 @@ if run_step == "verify":
     run_tavily_billed = float(enrich_result.counts.get("tavily_actual_billed_usd") or 0)
     st.session_state["last_action"] = {
         "message": (
-            f"Verified {score_result.counts.get('scored', 0):,} companies from a {cap:,}-company batch. "
+            f"Verified {score_result.counts.get('scored', 0):,} companies from a {cap:,}-company {VERIFY_MODE_PRESETS.get(active_verify_mode, VERIFY_MODE_PRESETS['balanced'])['label'].lower()} batch. "
             f"Local OpenAI token estimate: {_format_currency(run_openai_estimate)}. "
             f"Tavily credits consumed: {run_tavily_credits:,}; Tavily billed spend: {_format_currency(run_tavily_billed)}."
         ),
         "level": level,
     }
+    st.session_state.pop("active_verify_mode", None)
     frame, metrics = _load_frame_and_metrics(conn)
     st.rerun()
 

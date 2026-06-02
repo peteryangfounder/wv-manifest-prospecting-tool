@@ -361,8 +361,10 @@ def candidates_for_enrichment(
     limit: int,
     force: bool = False,
     high_priority_only: bool = False,
+    mode: str = "balanced",
 ) -> list[dict[str, Any]]:
     priority_filter = "AND c.high_priority_enrichment = 1" if high_priority_only else ""
+    mode_filter = _candidate_mode_filter(mode)
     priority_order = """
               CASE
                 WHEN c.high_priority_enrichment = 1 THEN 0
@@ -375,7 +377,7 @@ def candidates_for_enrichment(
         query = f"""
             SELECT c.*
             FROM companies c
-            WHERE c.is_candidate = 1 {priority_filter}
+            WHERE c.is_candidate = 1 {priority_filter} {mode_filter}
             ORDER BY
               {priority_order}
               c.canonical_name COLLATE NOCASE
@@ -387,7 +389,7 @@ def candidates_for_enrichment(
             FROM companies c
             LEFT JOIN enrichments e
               ON e.company_id = c.id AND e.provider = 'tavily' AND e.status = 'success'
-            WHERE c.is_candidate = 1 {priority_filter} AND e.id IS NULL
+            WHERE c.is_candidate = 1 {priority_filter} {mode_filter} AND e.id IS NULL
             ORDER BY
               {priority_order}
               c.canonical_name COLLATE NOCASE
@@ -402,12 +404,14 @@ def enriched_for_openai_scoring(
     limit: int,
     force: bool = False,
     high_priority_only: bool = False,
+    mode: str = "balanced",
 ) -> list[dict[str, Any]]:
     if force:
         score_filter = ""
     else:
         score_filter = "AND (s.id IS NULL OR s.provider != 'openai')"
     priority_filter = "AND c.high_priority_enrichment = 1" if high_priority_only else ""
+    mode_filter = _candidate_mode_filter(mode)
     priority_order = """
           CASE
             WHEN c.high_priority_enrichment = 1 THEN 0
@@ -423,7 +427,7 @@ def enriched_for_openai_scoring(
         FROM companies c
         JOIN enrichments e ON e.company_id = c.id AND e.provider = 'tavily' AND e.status = 'success'
         LEFT JOIN scores s ON s.company_id = c.id
-        WHERE c.is_candidate = 1 {priority_filter} {score_filter}
+        WHERE c.is_candidate = 1 {priority_filter} {mode_filter} {score_filter}
         ORDER BY
           {priority_order}
           c.canonical_name COLLATE NOCASE
@@ -432,6 +436,20 @@ def enriched_for_openai_scoring(
         (limit,),
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+def _candidate_mode_filter(mode: str) -> str:
+    if str(mode or "").strip().lower().replace("_", "-") in {"precision", "precision-first"}:
+        return "AND c.deterministic_type = 'likely_startup_or_tech'"
+    return ""
+
+
+def count_candidate_universe(conn: sqlite3.Connection, mode: str = "balanced") -> int:
+    mode_filter = _candidate_mode_filter(mode)
+    row = conn.execute(
+        f"SELECT COUNT(*) FROM companies c WHERE c.is_candidate = 1 {mode_filter}"
+    ).fetchone()
+    return int(row[0] if row else 0)
 
 
 def cached_company_for_verification(conn: sqlite3.Connection) -> dict[str, Any] | None:

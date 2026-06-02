@@ -58,6 +58,8 @@ Future cheap-recall layers could include website-domain discovery, homepage meta
 
 The next major product improvement would be a free or near-free web-metadata pass before Tavily. For example, the app could discover likely domains from search result pages, fetch company homepages directly, parse titles/meta descriptions/schema.org data, and use that text to rank ambiguous companies before paid enrichment. That would add recall without sending every row immediately to an LLM.
 
+The target production cascade should be: conservative deterministic exclusion, domain discovery, homepage metadata extraction, local semantic triage, Tavily Basic Search for unresolved or uncertain rows, evidence-gated OpenAI scoring, dual ranking by investment fit and review priority, and false-negative audits. The app should store each stage as a versioned artifact so the team can measure whether the extra stage improved recall, precision, cost per useful lead, and review burden.
+
 ## Cost Governance
 
 The current app already separates live OpenAI project billing, recent billing, internal token-rate estimates, Tavily included credits, Tavily billed spend, and Streamlit Cloud hosting. Production cost governance should add account-level budgets, campaign-level budgets, per-provider budgets, approval thresholds, and audit history.

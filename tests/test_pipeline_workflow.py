@@ -46,14 +46,16 @@ def test_generate_verified_prospects_runs_enrichment_then_scoring(monkeypatch, t
     calls: list[tuple[str, int, bool]] = []
     settings = _settings(tmp_path)
 
-    def fake_enrich(conn, received_settings, limit=None, force=False):
+    def fake_enrich(conn, received_settings, limit=None, force=False, mode="balanced"):
         calls.append(("enrich", limit, force))
         assert received_settings is settings
+        assert mode == "balanced"
         return pipeline.PipelineResult("tavily_enrichment", "enriched", {})
 
-    def fake_score(conn, received_settings, limit=None, force=False):
+    def fake_score(conn, received_settings, limit=None, force=False, mode="balanced"):
         calls.append(("score", limit, force))
         assert received_settings is settings
+        assert mode == "balanced"
         return pipeline.PipelineResult("openai_scoring", "scored", {})
 
     monkeypatch.setattr(pipeline, "enrich_candidates", fake_enrich)

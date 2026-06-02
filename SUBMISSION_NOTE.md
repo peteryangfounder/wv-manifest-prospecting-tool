@@ -106,8 +106,12 @@ The current provider architecture is optimized for network-bound I/O. It should 
 
 The biggest technical tradeoff is precision versus recall in the first API-backed pass. The current default is ranked rather than exclusive: high-signal rows run first for precision, but ambiguous candidates remain eligible within the same approved batch for recall. For a production fund workflow, the next step would be configurable recall modes: a low-cost first pass, a broader partner-reviewed pass, and a full-universe pass with explicit spend approval.
 
+The current app now exposes this tradeoff as verification modes. Precision-first uses the likely startup or technology queue and intentionally avoids ambiguous rows. Balanced is the default and uses the ranked broad-candidate queue. Recall-first is for broad coverage and audits under a larger approved cap. This does not fully solve recall yet, but it makes the operator choose the precision/recall posture explicitly instead of hiding the tradeoff in code.
+
+The strongest next engineering step is the staged evidence cascade recommended in the follow-up architecture review: add domain discovery and homepage metadata extraction before Tavily. The app should cheaply fetch titles, meta descriptions, OpenGraph descriptions, JSON-LD organization data, and bounded homepage/about/product snippets for API-eligible candidates. That creates business-description evidence for companies with non-obvious names, lets the app rank ambiguous companies more intelligently, and reduces how often Tavily/OpenAI need to be used as first evidence sources.
+
 ## Validation
 
-The repository includes pytest coverage for cleaning, deterministic rules, database migrations, cache reuse, priority queues, verified prospect view models, billing parsing and pagination, billing cache behavior, Tavily billing math, and concurrent enrichment/scoring persistence. The latest full test run passed with 36 tests.
+The repository includes pytest coverage for cleaning, deterministic rules, database migrations, cache reuse, priority queues, verified prospect view models, billing parsing and pagination, billing cache behavior, Tavily billing math, and concurrent enrichment/scoring persistence. The latest full test run passed with 37 tests.
 
 The final product demonstrates a complete loop: retrieve and clean the source universe, cheaply screen it, enrich likely candidates with external evidence, score those candidates with structured AI output, cache paid work, show ranked investor-facing results, and report live billing and internal estimates without mixing the two.

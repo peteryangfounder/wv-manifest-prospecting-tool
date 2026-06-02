@@ -57,3 +57,8 @@ def test_paid_queue_orders_high_signal_before_ambiguous_without_dropping_ambiguo
     assert [candidate["canonical_name"] for candidate in candidates] == ["Alpha AI", "Northstar Labs"]
     assert candidates[0]["high_priority_enrichment"] == 1
     assert candidates[1]["deterministic_type"] == "unknown_needs_enrichment"
+
+    precision_candidates = db.candidates_for_enrichment(conn, limit=10, mode="precision-first")
+    assert [candidate["canonical_name"] for candidate in precision_candidates] == ["Alpha AI"]
+    assert db.count_candidate_universe(conn, mode="precision-first") == 1
+    assert db.count_candidate_universe(conn, mode="balanced") == 2

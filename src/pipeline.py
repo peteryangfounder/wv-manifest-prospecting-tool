@@ -188,6 +188,7 @@ def enrich_candidates(
     limit: int | None = None,
     force: bool = False,
     progress_callback=None,
+    mode: str = "balanced",
 ) -> PipelineResult:
     limit = limit or settings.max_enrich
     run_id = db.start_run(conn, "tavily_enrichment")
@@ -199,7 +200,7 @@ def enrich_candidates(
             {"tavily_calls": 0, "enriched": 0, "cache_hits": 0},
         )
 
-    companies = db.candidates_for_enrichment(conn, limit=limit, force=force)
+    companies = db.candidates_for_enrichment(conn, limit=limit, force=force, mode=mode)
     calls = 0
     enriched = 0
     errors = 0
@@ -254,7 +255,7 @@ def enrich_candidates(
         tavily_calls=calls,
         cache_hits=cache_hits,
         estimated_cost_usd=0.0,
-        notes=f"Errors: {errors}. Retries: {retry_attempts}. Force refresh: {force}.",
+        notes=f"Errors: {errors}. Retries: {retry_attempts}. Force refresh: {force}. Mode: {mode}.",
     )
     return PipelineResult(
         "tavily_enrichment",
@@ -285,6 +286,7 @@ def score_enriched_candidates(
     limit: int | None = None,
     force: bool = False,
     progress_callback=None,
+    mode: str = "balanced",
 ) -> PipelineResult:
     limit = limit or settings.max_score
     run_id = db.start_run(conn, "openai_scoring")
@@ -296,7 +298,7 @@ def score_enriched_candidates(
             {"openai_calls": 0, "scored": 0, "errors": 0},
         )
 
-    companies = db.enriched_for_openai_scoring(conn, limit=limit, force=force)
+    companies = db.enriched_for_openai_scoring(conn, limit=limit, force=force, mode=mode)
     calls = 0
     scored = 0
     errors = 0
@@ -360,7 +362,7 @@ def score_enriched_candidates(
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
         estimated_cost_usd=estimated_cost_usd,
-        notes=f"Errors: {errors}. Retries: {retry_attempts}. Force refresh: {force}. Model: {settings.openai_model}.",
+        notes=f"Errors: {errors}. Retries: {retry_attempts}. Force refresh: {force}. Model: {settings.openai_model}. Mode: {mode}.",
     )
     return PipelineResult(
         "openai_scoring",
@@ -701,8 +703,9 @@ def generate_verified_prospects(
     enrich_limit: int | None = None,
     score_limit: int | None = None,
     force: bool = False,
+    mode: str = "balanced",
 ) -> list[PipelineResult]:
     return [
-        enrich_candidates(conn, settings, enrich_limit or settings.max_enrich, force=force),
-        score_enriched_candidates(conn, settings, score_limit or settings.max_score, force=force),
+        enrich_candidates(conn, settings, enrich_limit or settings.max_enrich, force=force, mode=mode),
+        score_enriched_candidates(conn, settings, score_limit or settings.max_score, force=force, mode=mode),
     ]

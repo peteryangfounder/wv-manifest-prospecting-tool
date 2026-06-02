@@ -15,7 +15,7 @@ Hosted app: https://wv-manifest-prospecting-tool-b8jadagmhgsh8wirbknjb9.streamli
 - Responsive prospect cards so company descriptions and sector tags stay readable across desktop, tablet, and mobile.
 - Prominent API usage and cost summary that separates live provider billing, included Tavily credits, Streamlit Cloud hosting, and internal token-rate estimates.
 - Wittington project lifetime-to-date OpenAI billing, recent OpenAI billing, last fetch time, cache status, and billing-window metadata.
-- Model selector and batch cap for controlling how many companies get verified in each run, with pre-run cost and runtime confirmation before paid provider calls begin.
+- Model selector, verification mode, and batch cap for controlling how many companies get verified in each run, with pre-run cost and runtime confirmation before paid provider calls begin.
 - Concurrent Tavily enrichment and OpenAI scoring with bounded retry/backoff for rate limits and transient provider errors.
 - Scoring weight controls for investor preference changes.
 - Simple reset button that clears local source rows, cached enrichments, scores, and run history.
@@ -82,7 +82,7 @@ streamlit run app.py
 Use the dashboard in this order:
 
 1. Click **1. Load and screen source data**.
-2. Choose the number of companies to verify and the OpenAI model.
+2. Choose the number of companies to verify, verification mode, and OpenAI model.
 3. Click **2. Verify prospects with APIs**.
 4. Review the projected Tavily calls, OpenAI calls, token-rate estimate, Tavily billed cost, total estimated provider cost, worker counts, and estimated runtime.
 5. Click **Confirm and start API run** if the estimate is acceptable.
@@ -155,6 +155,14 @@ Rows with clear technology or Wittington-relevant signals run first. Examples of
 This is why the demo can be cost-effective without relying on a brittle keyword-only boundary. The deterministic name pass is used only for hard exclusions and ordering. It is not the final investment judgment. The app avoids paying Tavily and OpenAI to inspect obvious non-prospects, starts with rows most likely to contain technology companies, then keeps moving into ambiguous candidates within the approved batch cap. Tavily provides low-cost external web evidence, and OpenAI scores the compact evidence rather than the name alone. The app reuses cached provider results and uses compact prompts with a low-cost OpenAI model. This is a ranked cost-control architecture, not an assertion that company names alone are enough to identify every investable startup.
 
 At the current configured prices, a broad pass over all 2,444 API-eligible candidates is still designed to be plausible under a small testing budget when Tavily pay-as-you-go is explicitly enabled: the first 1,000 Tavily credits are included on the Researcher plan, 1,444 additional credits at `$0.008` would be about `$11.55`, and the default OpenAI token-rate estimate for compact `gpt-4o-mini` scoring is typically well below the remaining budget. The confirmation screen computes the actual projected calls, candidate mix, tokens, Tavily overage, pay-as-you-go status, and estimated provider cost before any paid provider calls begin.
+
+Verification modes make the precision/recall tradeoff explicit:
+
+- **Precision-first** limits the paid queue to likely startup or technology rows. This is lower noise and lower cost, but it has higher false-negative risk.
+- **Balanced** is the default. It runs high-signal and likely-technology rows first, then adds ambiguous candidates within the approved cap.
+- **Recall-first** is for broad audits and larger approved runs. In the current implementation it uses the broad candidate universe; the next version should add homepage/domain evidence before the Tavily step.
+
+The next recommended architecture is a staged evidence cascade: deterministic exclusions, domain discovery, homepage metadata extraction, local semantic triage, budget-aware Tavily Basic Search, evidence-gated OpenAI scoring, ranking, and false-negative audits. That avoids both bad extremes: name-keyword filtering only, and blindly spending paid APIs on every raw row.
 
 ## Billing And Usage Tracking
 
