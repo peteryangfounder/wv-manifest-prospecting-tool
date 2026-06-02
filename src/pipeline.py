@@ -292,6 +292,7 @@ def collect_homepage_evidence(
     force: bool = False,
     progress_callback=None,
     mode: str = "balanced",
+    max_domain_attempts: int | None = None,
 ) -> PipelineResult:
     configured_limit = _setting_int(settings, "homepage_evidence_max_per_run", 100)
     limit = min(limit or configured_limit, configured_limit)
@@ -310,7 +311,14 @@ def collect_homepage_evidence(
 
     session = requests.Session()
     for index, company in enumerate(companies, start=1):
-        result = _collect_homepage_for_company(company, session, timeout=timeout, max_bytes=max_bytes, mode=mode)
+        collect_kwargs = {
+            "timeout": timeout,
+            "max_bytes": max_bytes,
+            "mode": mode,
+        }
+        if max_domain_attempts is not None:
+            collect_kwargs["max_domain_attempts"] = max_domain_attempts
+        result = _collect_homepage_for_company(company, session, **collect_kwargs)
         db.save_homepage_evidence(conn, result, commit=False)
         if result.get("route_decision") == "score_from_homepage":
             db.save_enrichment(conn, _homepage_enrichment_from_evidence(result), commit=False)
@@ -368,6 +376,7 @@ def _collect_homepage_for_company(
     timeout: float,
     max_bytes: int,
     mode: str,
+    max_domain_attempts: int | None = None,
 ) -> dict[str, Any]:
     company_name = company["canonical_name"]
     best = None
@@ -375,7 +384,11 @@ def _collect_homepage_for_company(
     best_confidence = 0.0
     fetch_error = None
 
-    for domain in generate_domain_candidates(company_name):
+    domain_candidates = generate_domain_candidates(company_name)
+    if max_domain_attempts is not None:
+        domain_candidates = domain_candidates[: max(1, int(max_domain_attempts))]
+
+    for domain in domain_candidates:
         metadata = fetch_homepage_metadata(domain, session=session, timeout=timeout, max_bytes=max_bytes)
         confidence = score_domain_confidence(company_name, domain, metadata)
         fetch_error = metadata.fetch_error or fetch_error

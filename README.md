@@ -85,12 +85,12 @@ streamlit run app.py
 Use the dashboard in this order:
 
 1. Click **1. Load and screen source data**.
-2. Choose the number of companies to verify, verification mode, and OpenAI model.
-3. Leave **Demo safe mode** on for an interview walkthrough. Safe mode keeps homepage evidence preview available and disables the paid Tavily/OpenAI run button.
-4. Click **2. Review evidence and cost estimate**.
-5. Review the Evidence Cascade Summary, search calls avoided, route examples, projected search calls, AI scoring calls, provider cost estimate, and runtime.
-6. Click **Preview homepage evidence sample** to populate a fast no-paid evidence cascade sample.
-7. Turn off **Demo safe mode** only if you intentionally want to start a paid provider run, then click **Start paid API run**.
+2. Leave **Simple demo view** and **Demo safe mode** on for an interview walkthrough. Simple demo view shows one guided path first. Safe mode keeps homepage evidence preview available and disables the paid Tavily/OpenAI run button.
+3. Click **2. Review evidence and cost estimate**.
+4. Click **Preview homepage evidence sample** to populate a fast no-paid evidence cascade sample.
+5. Review the compact Evidence Cascade, search calls avoided, data gaps, and top verified prospects.
+6. Open the detail expanders only when needed: route examples, false-negative audit sample, billing details, charts, and internal estimates.
+7. Turn off **Demo safe mode** only if you intentionally want to start a paid provider run, then choose the batch settings and click **Start paid API run**.
 8. Review the Overview, Source list, Verified prospects, and Company detail tabs.
 
 For a command-line run:

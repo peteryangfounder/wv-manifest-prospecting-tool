@@ -118,7 +118,7 @@ Ranked prospect cards and company detail views now show whether the supporting e
 
 The app also includes a lightweight false-negative audit sample. It surfaces soft-excluded rows, low-priority data gaps, unresolved domains, and ambiguous companies not yet selected by the current cap. This is not production-grade validation, but it shows the right operating discipline: uncertain or rejected rows should be sampled so the fund can estimate what the funnel might be missing.
 
-For the live demo, the app has a default-on demo safe mode. Safe mode keeps the homepage evidence preview available but disables the paid Tavily/OpenAI run button. The intended narrative is simple: the tool does not judge raw company names; it gathers cheap homepage evidence first; it escalates to search only when evidence is missing or unclear; OpenAI scores evidence packets rather than names; and the UI exposes confidence, snippets, route reasons, search calls avoided, and audit samples.
+For the live demo, the app has a default-on simple demo view and demo safe mode. Simple demo view keeps the investor-facing path focused on the next action, four key cascade metrics, top prospects, and optional detail expanders instead of showing every technical chart at once. Safe mode keeps the homepage evidence preview available but disables the paid Tavily/OpenAI run button. The intended narrative is simple: the tool does not judge raw company names; it gathers cheap homepage evidence first; it escalates to search only when evidence is missing or unclear; OpenAI scores evidence packets rather than names; and the UI exposes confidence, snippets, route reasons, search calls avoided, and audit samples.
 
 ## Validation
 

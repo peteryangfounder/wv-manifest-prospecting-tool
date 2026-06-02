@@ -83,7 +83,7 @@ class Settings:
     provider_backoff_initial_seconds: float = 1.0
     provider_backoff_max_seconds: float = 20.0
     homepage_evidence_max_per_run: int = 100
-    homepage_preview_max_per_click: int = 3
+    homepage_preview_max_per_click: int = 1
     homepage_fetch_timeout_seconds: float = 4.0
     homepage_fetch_max_bytes: int = 200_000
     tavily_plan_name: str = "Researcher"
@@ -115,7 +115,7 @@ def get_settings() -> Settings:
         provider_backoff_initial_seconds=_env_float("PROVIDER_BACKOFF_INITIAL_SECONDS", 1.0),
         provider_backoff_max_seconds=_env_float("PROVIDER_BACKOFF_MAX_SECONDS", 20.0),
         homepage_evidence_max_per_run=_env_int("HOMEPAGE_EVIDENCE_MAX_PER_RUN", 100),
-        homepage_preview_max_per_click=_env_int("HOMEPAGE_PREVIEW_MAX_PER_CLICK", 3),
+        homepage_preview_max_per_click=_env_int("HOMEPAGE_PREVIEW_MAX_PER_CLICK", 1),
         homepage_fetch_timeout_seconds=_env_float("HOMEPAGE_FETCH_TIMEOUT_SECONDS", 4.0),
         homepage_fetch_max_bytes=_env_int("HOMEPAGE_FETCH_MAX_BYTES", 200_000),
         tavily_max_results=_env_int("TAVILY_MAX_RESULTS", 3),
