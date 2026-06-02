@@ -540,23 +540,26 @@ CUSTOM_CSS = """
     border-radius: 8px !important;
     min-height: 2.7rem;
   }
-  .global-cache-link {
+  .global-cache-form {
+    position: fixed;
+    right: max(1rem, calc((100vw - 760px) / 2));
+    top: 0.85rem;
+    z-index: 100;
+  }
+  .global-cache-button {
     background: #ffffff;
     border: 1px solid #d5dbe5;
     border-radius: 8px;
     color: #313647;
+    cursor: pointer;
+    font-family: inherit;
     font-size: 0.78rem;
     font-weight: 650;
     line-height: 1;
     padding: 0.48rem 0.62rem;
-    position: fixed;
-    right: max(1rem, calc((100vw - 760px) / 2));
-    text-decoration: none;
-    top: 0.85rem;
     white-space: nowrap;
-    z-index: 100;
   }
-  .global-cache-link:hover {
+  .global-cache-button:hover {
     border-color: #9aa4b2;
     color: #202332;
   }
@@ -2382,7 +2385,12 @@ st.session_state["slide_index"] = slide_index
 slide = slides[slide_index]
 
 st.markdown(
-    "<a class='global-cache-link' href='?clear_processing_cache=1' title='Clears company rows, company-page data, Tavily Search API results, and OpenAI API scores. Keeps run history and API cost records.'>Clear cache</a>",
+    """
+    <form class="global-cache-form" method="get" title="Clears company rows, company-page data, Tavily Search API results, and OpenAI API scores. Keeps run history and API cost records.">
+      <input type="hidden" name="clear_processing_cache" value="1" />
+      <button class="global-cache-button" type="submit">Clear cache</button>
+    </form>
+    """,
     unsafe_allow_html=True,
 )
 st.markdown(
