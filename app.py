@@ -170,10 +170,10 @@ CUSTOM_CSS = """
   h1, h2, h3 {
     letter-spacing: 0 !important;
   }
-  .wv-header {
+  .header-divider {
     border-bottom: 1px solid var(--wv-line);
-    margin-bottom: 0.65rem;
-    padding: 0.15rem 0 0.7rem 0;
+    margin-bottom: 0.55rem;
+    padding-top: 0.7rem;
   }
   .wv-eyebrow {
     color: #5d6675;
@@ -199,13 +199,6 @@ CUSTOM_CSS = """
     font-size: 0.88rem;
     margin: 0.45rem 0 0 0;
     max-width: 700px;
-  }
-  .cache-note {
-    color: #697386;
-    font-size: 0.76rem;
-    line-height: 1.35;
-    margin-top: 0.25rem;
-    text-align: right;
   }
   .guided-panel {
     background: #ffffff;
@@ -547,10 +540,25 @@ CUSTOM_CSS = """
     border-radius: 8px !important;
     min-height: 2.7rem;
   }
-  .header-cache-control .stButton > button {
-    min-height: 2.15rem;
-    padding: 0.35rem 0.7rem;
+  .global-cache-link {
+    background: #ffffff;
+    border: 1px solid #d5dbe5;
+    border-radius: 8px;
+    color: #313647;
+    font-size: 0.78rem;
+    font-weight: 650;
+    line-height: 1;
+    padding: 0.48rem 0.62rem;
+    position: fixed;
+    right: max(1rem, calc((100vw - 760px) / 2));
+    text-decoration: none;
+    top: 0.85rem;
     white-space: nowrap;
+    z-index: 100;
+  }
+  .global-cache-link:hover {
+    border-color: #9aa4b2;
+    color: #202332;
   }
   .run-settings {
     background: #f8fafc;
@@ -980,9 +988,6 @@ CUSTOM_CSS = """
     }
   }
   @media (max-width: 760px) {
-    .cache-note {
-      text-align: left;
-    }
     .step-row {
       grid-template-columns: 2rem 1fr;
     }
@@ -2119,6 +2124,16 @@ except ValueError:
     display_database_path = settings.database_path
 
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+clear_cache_param = st.query_params.get("clear_processing_cache")
+if clear_cache_param == "1" or clear_cache_param == ["1"]:
+    _clear_processing_cache(conn)
+    st.session_state["last_action"] = {
+        "message": "Cleared company rows, company-page data, Tavily Search API results, and OpenAI API scores. Run history and API cost records were kept.",
+        "level": "success",
+    }
+    st.query_params.clear()
+    st.rerun()
+
 frame, metrics = _load_frame_and_metrics(conn)
 
 weights: dict[str, int] = {}
@@ -2367,24 +2382,17 @@ st.session_state["slide_index"] = slide_index
 slide = slides[slide_index]
 
 st.markdown(
+    "<a class='global-cache-link' href='?clear_processing_cache=1' title='Clears company rows, company-page data, Tavily Search API results, and OpenAI API scores. Keeps run history and API cost records.'>Clear cache</a>",
+    unsafe_allow_html=True,
+)
+st.markdown(
     """
-    <div class="wv-header">
-      <h1 class="wv-title">Manifest Prospecting Tool</h1>
-      <p class="wv-subtitle">Scores Manifest attendee companies for Wittington Ventures.</p>
-    </div>
+    <h1 class="wv-title">Manifest Prospecting Tool</h1>
+    <p class="wv-subtitle">Scores Manifest attendee companies for Wittington Ventures.</p>
     """,
     unsafe_allow_html=True,
 )
-header_cols = st.columns((1, 0.34))
-with header_cols[1]:
-    st.markdown("<div class='header-cache-control'>", unsafe_allow_html=True)
-    if st.button("Clear processing cache", use_container_width=True):
-        st.session_state["clear_processing_cache_requested"] = True
-        st.rerun()
-    st.markdown(
-        "<div class='cache-note'>Keeps run history and API cost records.</div></div>",
-        unsafe_allow_html=True,
-    )
+st.markdown("<div class='header-divider'></div>", unsafe_allow_html=True)
 _render_slide_progress(slide_index, slide_count)
 _render_slide_header(slide["label"], slide["title"], slide["copy"])
 
