@@ -342,11 +342,14 @@ def collect_homepage_evidence(
     needs_tavily = 0
     errors = 0
     commit_interval = _commit_interval(settings)
-    timeout = float(_setting(settings, "homepage_fetch_timeout_seconds", 4.0))
-    max_bytes = _setting_int(settings, "homepage_fetch_max_bytes", 200_000)
+    timeout = float(_setting(settings, "homepage_fetch_timeout_seconds", 1.25))
+    max_bytes = _setting_int(settings, "homepage_fetch_max_bytes", 100_000)
+    workers = _bounded_worker_count(settings, "homepage_concurrency", 96, len(companies))
+    configured_domain_attempts = _setting_int(settings, "homepage_max_domain_attempts", 3)
+    if max_domain_attempts is None and configured_domain_attempts > 0:
+        max_domain_attempts = configured_domain_attempts
 
-    session = requests.Session()
-    for index, company in enumerate(companies, start=1):
+    def collect_one(company: dict[str, Any]) -> dict[str, Any]:
         collect_kwargs = {
             "timeout": timeout,
             "max_bytes": max_bytes,
@@ -354,29 +357,36 @@ def collect_homepage_evidence(
         }
         if max_domain_attempts is not None:
             collect_kwargs["max_domain_attempts"] = max_domain_attempts
-        result = _collect_homepage_for_company(company, session, **collect_kwargs)
-        db.save_homepage_evidence(conn, result, commit=False)
-        if result.get("route_decision") == "score_from_homepage":
-            db.save_enrichment(conn, _homepage_enrichment_from_evidence(result), commit=False)
-        processed += 1
-        accepted += 1 if result.get("domain_status") == "accepted" else 0
-        provisional += 1 if result.get("domain_status") == "provisional" else 0
-        unresolved += 1 if result.get("domain_status") == "unresolved" else 0
-        score_ready += 1 if result.get("route_decision") == "score_from_homepage" else 0
-        needs_tavily += 1 if result.get("route_decision") == "needs_tavily" else 0
-        errors += 1 if result.get("fetch_error") else 0
-        if index % commit_interval == 0:
-            conn.commit()
-        if progress_callback:
-            progress_callback(index, len(companies), result, {
-                "processed": processed,
-                "accepted": accepted,
-                "provisional": provisional,
-                "unresolved": unresolved,
-                "score_ready": score_ready,
-                "needs_tavily": needs_tavily,
-                "errors": errors,
-            })
+        with requests.Session() as session:
+            return _collect_homepage_for_company(company, session, **collect_kwargs)
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(collect_one, company) for company in companies]
+        for index, future in enumerate(as_completed(futures), start=1):
+            result = future.result()
+            db.save_homepage_evidence(conn, result, commit=False)
+            if result.get("route_decision") == "score_from_homepage":
+                db.save_enrichment(conn, _homepage_enrichment_from_evidence(result), commit=False)
+            processed += 1
+            accepted += 1 if result.get("domain_status") == "accepted" else 0
+            provisional += 1 if result.get("domain_status") == "provisional" else 0
+            unresolved += 1 if result.get("domain_status") == "unresolved" else 0
+            score_ready += 1 if result.get("route_decision") == "score_from_homepage" else 0
+            needs_tavily += 1 if result.get("route_decision") == "needs_tavily" else 0
+            errors += 1 if result.get("fetch_error") else 0
+            if index % commit_interval == 0:
+                conn.commit()
+            if progress_callback:
+                progress_callback(index, len(companies), result, {
+                    "processed": processed,
+                    "accepted": accepted,
+                    "provisional": provisional,
+                    "unresolved": unresolved,
+                    "score_ready": score_ready,
+                    "needs_tavily": needs_tavily,
+                    "errors": errors,
+                    "parallel_workers": workers,
+                })
     conn.commit()
     db.finish_run(
         conn,
@@ -388,7 +398,7 @@ def collect_homepage_evidence(
     )
     return PipelineResult(
         "homepage_evidence",
-        f"Checked company pages for {processed:,} companies. {score_ready:,} can be scored from company-page data; {needs_tavily:,} need web search.",
+        f"Checked company pages for {processed:,} companies with {workers:,} parallel workers. {score_ready:,} can be scored from company-page data; {needs_tavily:,} need web search.",
         {
             "processed": processed,
             "accepted_domains": accepted,
@@ -400,6 +410,8 @@ def collect_homepage_evidence(
             "tavily_call_avoided_by_homepage_evidence": score_ready,
             "estimated_tavily_credits_saved": score_ready,
             "estimated_tavily_cost_saved": score_ready * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0),
+            "parallel_workers": workers,
+            "domain_attempts_per_company": max_domain_attempts or len(generate_domain_candidates("example")),
             "estimated_cost_usd": 0.0,
         },
     )

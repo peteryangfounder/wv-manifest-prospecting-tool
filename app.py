@@ -2383,13 +2383,14 @@ if st.session_state.pop("prepare_manifest_requested", False):
 if st.session_state.pop("check_company_pages_requested", False):
     active_verify_mode = st.session_state.get("active_verify_mode", verify_mode)
     homepage_cap = max(1, int(st.session_state.get("homepage_check_cap", int(prospect_cap or 1))))
-    progress = st.progress(0, text=f"Checking up to {homepage_cap:,} company pages...")
+    homepage_workers = max(1, min(_setting_int(settings, "homepage_concurrency", 96), homepage_cap))
+    progress = st.progress(0, text=f"Checking up to {homepage_cap:,} company pages with {homepage_workers:,} parallel workers...")
 
     def homepage_progress(index, total, result, counts):
         if total:
             progress.progress(
                 min(1.0, index / total),
-                text=f"Company page check {index:,}/{total:,}",
+                text=f"Company page checks {index:,}/{total:,} with {homepage_workers:,} parallel workers",
             )
 
     homepage_result = collect_homepage_evidence(

@@ -109,7 +109,7 @@ def test_homepage_evidence_cache_prevents_repeated_fetch(monkeypatch, tmp_path: 
 
     calls = {"count": 0}
 
-    def fake_collect(company_row, session, *, timeout, max_bytes, mode):
+    def fake_collect(company_row, session, *, timeout, max_bytes, mode, max_domain_attempts=None):
         calls["count"] += 1
         metadata = extract_page_metadata(POSITIVE_HTML, "https://northstarlabs.com")
         evidence = extract_homepage_evidence(metadata)

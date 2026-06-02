@@ -1,4 +1,7 @@
 from pathlib import Path
+from dataclasses import replace
+import threading
+import time
 
 from src import db, pipeline
 from src.clean import CompanyRecord
@@ -153,6 +156,50 @@ def test_score_enriched_candidates_persists_parallel_results(monkeypatch, tmp_pa
     assert result.counts["prompt_tokens"] == 300
     assert result.counts["completion_tokens"] == 60
     assert metrics["openai_scored"] == 3
+
+
+def test_homepage_checks_run_in_parallel(monkeypatch, tmp_path: Path) -> None:
+    settings = replace(_settings(tmp_path), homepage_concurrency=4, homepage_max_domain_attempts=1)
+    conn = db.connect(settings.database_path)
+    db.init_db(conn)
+    _seed_candidate_companies(conn, ["Alpha AI", "Beta Health", "Gamma Climate", "Delta Robotics"])
+
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+
+    def fake_collect(company_row, session, *, timeout, max_bytes, mode, max_domain_attempts=None):
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.03)
+        with lock:
+            active -= 1
+        return {
+            "company_id": company_row["id"],
+            "candidate_domain": "example.com",
+            "resolved_url": "https://example.com",
+            "domain_confidence": 0.9,
+            "domain_status": "accepted",
+            "metadata_json": {"title": company_row["canonical_name"]},
+            "evidence_text": "Software company page.",
+            "evidence_quality": 0.9,
+            "positive_signals": ["software"],
+            "negative_signals": [],
+            "route_decision": "score_from_homepage",
+            "route_reason": "enough page data",
+            "fetch_error": None,
+        }
+
+    monkeypatch.setattr(pipeline, "_collect_homepage_for_company", fake_collect)
+
+    result = pipeline.collect_homepage_evidence(conn, settings, limit=4)
+
+    assert result.counts["processed"] == 4
+    assert result.counts["parallel_workers"] == 4
+    assert max_active > 1
+    assert db.homepage_evidence_summary(conn)["homepage_attempted"] == 4
 
 
 def test_provider_retry_handles_429_then_success(monkeypatch, tmp_path: Path) -> None:
