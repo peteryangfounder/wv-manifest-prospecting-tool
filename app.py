@@ -1677,14 +1677,14 @@ def _render_slide_footer(
             help=action_help,
         )
 
-    nav_cols = st.columns((1, 1.65))
-    if nav_cols[0].button("Previous", use_container_width=True, key="slide_previous"):
-        st.session_state["slide_index"] = max(0, slide_index - 1)
-        st.rerun()
-    nav_cols[1].markdown(
+    st.markdown(
         f"<div class='slide-action-note'>{html.escape(progress_label)}</div>",
         unsafe_allow_html=True,
     )
+    nav_cols = st.columns((1, 1))
+    if nav_cols[0].button("Previous", use_container_width=True, key="slide_previous"):
+        st.session_state["slide_index"] = max(0, slide_index - 1)
+        st.rerun()
     return nav_cols[1].button(
         action_label,
         type="primary",
