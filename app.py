@@ -2696,7 +2696,6 @@ if slide["key"] == "overview":
             ("Score", "Score companies using company-page data or Tavily web-search data."),
             ("Cost detail", "Review API calls, token estimates, and provider billing details."),
             ("Scored companies", "Review the ranked companies and the source data used for scoring."),
-            ("Page-check details", "Review which companies used page data and which needed web search."),
         ],
     )
 elif slide["key"] == "source":
