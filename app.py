@@ -1771,78 +1771,17 @@ show_verified_only = True
 selected_types: list[str] = []
 selected_sectors: list[str] = []
 selected_confidence: list[str] = []
+source_rows_shown = 30
+simple_demo_view = True
+demo_safe_mode = False
+weights = dict(DEFAULT_WEIGHTS)
 
 with st.sidebar:
-    st.markdown("### Demo controls")
-    demo_safe_mode = st.checkbox(
-        "Demo safe mode",
-        value=bool(st.session_state.get("demo_safe_mode", _setting(settings, "demo_safe_mode_default", True))),
-        key="demo_safe_mode",
-        help="When on, the homepage evidence preview still works, but the paid Tavily/OpenAI run button is disabled.",
-    )
-    st.caption("Safe mode blocks paid search and OpenAI scoring unless you turn it off.")
-    simple_demo_view = st.checkbox(
-        "Simple demo view",
-        value=bool(st.session_state.get("simple_demo_view", True)),
-        key="simple_demo_view",
-        help="Shows the guided workflow first and hides detailed analytics in expanders.",
-    )
-
-    with st.expander("System status", expanded=False):
-        st.markdown(
-            "<div class='sidebar-badge'><strong>Tavily</strong>: "
-            f"{'configured' if settings.tavily_api_key else 'missing key'}</div>"
-            "<div class='sidebar-badge'><strong>OpenAI</strong>: "
-            f"{'configured' if settings.openai_api_key else 'missing key'}</div>"
-            "<div class='sidebar-badge'><strong>OpenAI billing</strong>: "
-            f"{'admin key configured' if _setting(settings, 'openai_admin_key', None) else 'admin key missing'}</div>",
-            unsafe_allow_html=True,
-        )
-        st.caption(f"SQLite: `{display_database_path}`")
-
-    with st.expander("Display options", expanded=False):
-        source_rows_shown = st.number_input(
-            "Source cards shown",
-            min_value=10,
-            max_value=500,
-            value=int(st.session_state.get("source_rows_shown", 75)),
-            step=10,
-            key="source_rows_shown",
-            help="How many source cards to show in the Source list tab. This does not change API calls.",
-        )
-
-    with st.expander("Review scoring weights", expanded=False):
-        for key, default in DEFAULT_WEIGHTS.items():
-            weights[key] = st.slider(
-                _humanize(key),
-                min_value=0,
-                max_value=50,
-                value=int(st.session_state.get(f"weight_{key}", default)),
-                step=5,
-                key=f"weight_{key}",
-            )
-
-    with st.expander("Filters", expanded=False):
-        if frame.empty:
-            st.caption("Load source data to enable filters.")
-        else:
-            min_score = st.slider("Minimum fit score", min_value=0, max_value=100, value=0)
-            show_verified_only = st.checkbox("Verified prospects only", value=True)
-            type_options = sorted([value for value in frame["company_type"].dropna().unique().tolist() if value])
-            confidence_options = sorted([value for value in frame["confidence"].dropna().unique().tolist() if value])
-            all_sectors = sorted({tag for tags in frame["sector_tags"] for tag in (tags or [])})
-            selected_types = st.multiselect("Company type", type_options, default=[], format_func=_humanize)
-            selected_sectors = st.multiselect("Sector", all_sectors, default=[], format_func=_humanize)
-            selected_confidence = st.multiselect("Confidence", confidence_options, default=[], format_func=_humanize)
-
-    if st.button(
-        "Reset app data",
-        use_container_width=True,
-        help="Clear source rows, cached enrichments, scores, and run history so the workflow starts fresh.",
-    ):
+    st.markdown("### Controls")
+    if st.button("Reset workflow", use_container_width=True):
         _reset_database(conn)
         st.session_state["last_action"] = {
-            "message": "App data reset. Start again with step 1.",
+            "message": "Workflow reset. Start again with the Manifest list.",
             "level": "success",
         }
         st.rerun()
@@ -1851,7 +1790,7 @@ st.markdown(
     """
     <div class="wv-header">
       <h1 class="wv-title">Manifest Prospecting Tool</h1>
-      <p class="wv-subtitle">A guided Wittington Ventures workflow for screening Manifest companies with evidence before paid API calls.</p>
+      <p class="wv-subtitle">Screen Manifest companies with evidence, targeted search, AI scoring, and clear cost tracking.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -1863,19 +1802,19 @@ st.markdown("<div class='guided-kicker'>Guided workflow</div>", unsafe_allow_htm
 if workflow_stage == 1:
     st.markdown("<div class='guided-title'>Step 1: Prepare the source list</div>", unsafe_allow_html=True)
     st.markdown(
-        "<div class='guided-copy'>Start here. This prepares the attendee file without paid API calls.</div>",
+        "<div class='guided-copy'>Load the Manifest list, clean company names, remove duplicates, and screen out obvious non-prospects.</div>",
         unsafe_allow_html=True,
     )
 elif workflow_stage == 2:
-    st.markdown("<div class='guided-title'>Step 2: Review evidence cascade</div>", unsafe_allow_html=True)
+    st.markdown("<div class='guided-title'>Step 2: Build the evidence cascade</div>", unsafe_allow_html=True)
     st.markdown(
-        "<div class='guided-copy'>Preview homepage evidence, then decide whether paid search and AI are worth running.</div>",
+        "<div class='guided-copy'>Gather cheap homepage evidence first, then pay for search and AI only where the evidence is missing or promising.</div>",
         unsafe_allow_html=True,
     )
 else:
     st.markdown("<div class='guided-title'>Step 3: Review verified prospects</div>", unsafe_allow_html=True)
     st.markdown(
-        "<div class='guided-copy'>Review the ranked prospects first. Open detail sections only when needed.</div>",
+        "<div class='guided-copy'>Review the ranked companies, the evidence behind each rank, and the actual provider spend.</div>",
         unsafe_allow_html=True,
     )
 _render_guided_steps(metrics)
@@ -1889,14 +1828,14 @@ if workflow_stage == 1:
 elif workflow_stage == 2:
     _render_next_step(
         "Next",
-        "Preview evidence before paying for search or AI.",
-        "Safe mode is on by default. Start with the homepage evidence sample.",
+        "Check the low-cost evidence layer.",
+        "Preview homepage evidence, then confirm the paid search and AI run only if the cost estimate looks right.",
     )
 else:
     _render_next_step(
         "Next",
-        "Review the ranked prospects and evidence.",
-        "Start with the prospect cards. Open detail sections only when useful.",
+        "Review the best prospects.",
+        "Start with the top ranked companies. Cost and evidence details are directly below.",
     )
 
 selected_model = st.session_state.get("selected_openai_model", settings.openai_model)
@@ -1908,48 +1847,6 @@ if verify_mode not in VERIFY_MODE_PRESETS:
 model_pricing = _selected_model_pricing(selected_model)
 prospect_cap = int(st.session_state.get("prospect_cap", min(settings.max_score, 100)))
 runtime_settings = _settings_for_run(settings, selected_model, model_pricing["input"], model_pricing["output"])
-
-if workflow_stage >= 2:
-    settings_context = st.expander("Optional run settings", expanded=False) if simple_demo_view else st.container()
-    with settings_context:
-        settings_cols = st.columns((1, 1, 1, 1.15))
-        prospect_cap = settings_cols[0].number_input(
-            "Companies to verify now",
-            min_value=1,
-            max_value=5000,
-            value=int(st.session_state.get("prospect_cap", min(settings.max_score, 100))),
-            step=5,
-            key="prospect_cap",
-            help="Maximum number of ranked candidate companies to enrich and score in this API run. Strong signal rows run first, followed by broader ambiguous candidates.",
-        )
-        selected_model = settings_cols[1].selectbox(
-            "OpenAI scoring model",
-            list(OPENAI_MODEL_PRESETS.keys()),
-            index=list(OPENAI_MODEL_PRESETS.keys()).index(selected_model),
-            key="selected_openai_model",
-            help="Model name sent to OpenAI for the scoring step.",
-        )
-        verify_mode_labels = [item["label"] for item in VERIFY_MODE_PRESETS.values()]
-        verify_mode_keys = list(VERIFY_MODE_PRESETS.keys())
-        selected_mode_label = settings_cols[2].selectbox(
-            "Verification mode",
-            verify_mode_labels,
-            index=verify_mode_keys.index(verify_mode),
-            key="verify_mode_label",
-            help="Controls the precision/recall posture for the API queue.",
-        )
-        verify_mode = verify_mode_keys[verify_mode_labels.index(selected_mode_label)]
-        st.session_state["verify_mode"] = verify_mode
-        model_pricing = _selected_model_pricing(selected_model)
-        runtime_settings = _settings_for_run(settings, selected_model, model_pricing["input"], model_pricing["output"])
-        settings_cols[3].markdown(
-            f"**Cost estimate inputs**  \n"
-            f"Input: `${model_pricing['input']:g}` / 1M tokens  \n"
-            f"Output: `${model_pricing['output']:g}` / 1M tokens  \n"
-            f"Search plan: `{_setting(settings, 'tavily_plan_name', 'Researcher')}`  \n"
-            f"Workers: `{_setting_int(settings, 'tavily_concurrency', 12)}` search, "
-            f"`{_setting_int(settings, 'openai_concurrency', 6)}` scoring"
-        )
 
 if workflow_stage == 1:
     primary_label = "1. Load and screen source data"
@@ -1989,13 +1886,12 @@ if pending_verify_run and run_step != "source":
     projected_tavily_overage = int(pending_verify_run.get("projected_tavily_overage") or 0)
     tavily_payg_enabled_pending = bool(pending_verify_run.get("tavily_payg_enabled"))
     projected_rows = [
-        ("Mode", mode_label),
-        ("Batch cap", _format_int(pending_verify_run["cap"])),
+        ("Companies in this run", _format_int(pending_verify_run["cap"])),
         (
             "Candidate universe",
             f"{_format_int(broad_universe_pending)} API-eligible of {_format_int(unique_universe_pending)} unique",
         ),
-        ("Search calls to run", _format_int(pending_verify_run["projected_tavily_calls"])),
+        ("Search calls", _format_int(pending_verify_run["projected_tavily_calls"])),
         ("AI scoring calls", _format_int(pending_verify_run["projected_openai_calls"])),
         (
             "Candidate mix",
@@ -2005,10 +1901,10 @@ if pending_verify_run and run_step != "source":
                 f"{_format_int(ambiguous_pending)} ambiguous"
             ),
         ),
-        ("Projected input tokens", _format_int(pending_verify_run["projected_prompt_tokens"])),
-        ("Projected output tokens", _format_int(pending_verify_run["projected_completion_tokens"])),
-        ("Estimated AI scoring cost", _format_currency(pending_verify_run["projected_openai_estimate"])),
-        ("Estimated search cost", _format_currency(pending_verify_run["projected_tavily_bill"])),
+        ("OpenAI input tokens", _format_int(pending_verify_run["projected_prompt_tokens"])),
+        ("OpenAI output tokens", _format_int(pending_verify_run["projected_completion_tokens"])),
+        ("AI cost estimate", _format_currency(pending_verify_run["projected_openai_estimate"])),
+        ("Search cost estimate", _format_currency(pending_verify_run["projected_tavily_bill"])),
     ]
     if projected_tavily_overage > 0 and not tavily_payg_enabled_pending:
         projected_rows.append(
@@ -2027,10 +1923,6 @@ if pending_verify_run and run_step != "source":
         [
             ("Estimated total provider cost", _format_currency(pending_verify_run["projected_total"])),
             ("Estimated run time", _format_duration(int(pending_verify_run["estimated_seconds"]))),
-            (
-                "Parallel workers",
-                f"{pending_verify_run['tavily_workers']} search, {pending_verify_run['openai_workers']} scoring",
-            ),
             (
                 "Search credits after run",
                 f"{_format_int(pending_verify_run['tavily_credits_after'])} used, {_format_int(pending_verify_run['tavily_free_credits_remaining_after'])} included credits remaining",
@@ -2054,29 +1946,25 @@ if pending_verify_run and run_step != "source":
         ("Estimated search credits saved", _format_int(pending_verify_run.get("estimated_tavily_credits_saved") or 0)),
         ("Estimated search cost saved", _format_currency(pending_verify_run.get("estimated_tavily_cost_saved") or 0)),
     ]
-    st.markdown("<div class='section-label'>Step 2: Evidence preview</div>", unsafe_allow_html=True)
-    if simple_demo_view:
-        _render_next_step(
-            "Start here",
-            "Preview homepage evidence without paid API calls.",
-            "This checks a small sample, updates the cascade, and keeps paid search/AI disabled while demo safe mode is on.",
-        )
-        _render_mini_metrics(
-            [
-                ("API-eligible", _format_int(pending_verify_run.get("api_eligible_companies") or broad_universe_pending)),
-                ("Homepage tried", _format_int(pending_verify_run.get("homepage_attempted") or 0)),
-                ("Search avoided", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
-                ("Needs search", _format_int(pending_verify_run.get("cached_tavily_needed") or 0)),
-            ]
-        )
-    else:
-        _render_summary_card("Projected usage before starting", projected_rows)
-        _render_summary_card("Evidence Cascade Summary", cascade_rows)
+    st.markdown("<div class='section-label'>Run check</div>", unsafe_allow_html=True)
+    _render_next_step(
+        "Decision",
+        "Preview free homepage evidence, then confirm the paid run.",
+        "The paid run uses Tavily search only where homepage evidence is missing or unclear, then sends compact evidence packets to OpenAI for scoring.",
+    )
+    _render_mini_metrics(
+        [
+            ("Companies", _format_int(pending_verify_run["cap"])),
+            ("Search calls", _format_int(pending_verify_run["projected_tavily_calls"])),
+            ("AI calls", _format_int(pending_verify_run["projected_openai_calls"])),
+            ("Estimated cost", _format_currency(pending_verify_run["projected_total"])),
+        ]
+    )
     st.markdown(
-        "<div class='quiet-note'>Homepage evidence preview checks a small sample for the demo. It uses ordinary web requests only and does not call Tavily or OpenAI.</div>",
+        "<div class='quiet-note'>Homepage preview uses ordinary web requests only. No Tavily or OpenAI calls happen until the paid run is confirmed.</div>",
         unsafe_allow_html=True,
     )
-    if st.button("Preview homepage evidence sample", use_container_width=True):
+    if st.button("Preview homepage evidence - no paid APIs", use_container_width=True):
         with st.spinner("Collecting bounded homepage/domain evidence without paid provider calls..."):
             run_deterministic_classification(conn)
             preview_cap = max(1, min(int(pending_verify_run["cap"]), _setting_int(runtime_settings, "homepage_preview_max_per_click", 1)))
@@ -2105,11 +1993,10 @@ if pending_verify_run and run_step != "source":
         )
         st.rerun()
 
-    details_context = st.expander("Show detailed estimate and route examples", expanded=not simple_demo_view)
+    details_context = st.expander("Evidence and cost details", expanded=False)
     with details_context:
-        if simple_demo_view:
-            _render_summary_card("Projected usage before starting", projected_rows)
-            _render_summary_card("Evidence Cascade Summary", cascade_rows)
+        _render_summary_card("Cost estimate", projected_rows)
+        _render_summary_card("Evidence cascade", cascade_rows)
         route_tabs = st.tabs(["Homepage-positive", "Needs search", "Data gaps", "Soft-exclude", "Unresolved domain"])
         route_tab_specs = [
             ("score_from_homepage", "Homepage-positive examples"),
@@ -2134,15 +2021,12 @@ if pending_verify_run and run_step != "source":
             "OpenAI cost is an internal token-rate estimate based on the selected model and recent usage. "
             "Actual OpenAI billing may differ. No Tavily or OpenAI provider calls start until you confirm."
         )
-    st.markdown("<div class='section-label'>Optional paid run</div>", unsafe_allow_html=True)
-    if demo_safe_mode:
-        st.info("Demo safe mode is on. Homepage evidence preview is available, but paid Tavily/OpenAI runs are disabled.")
     confirm_cols = st.columns((1, 1))
-    if confirm_cols[0].button("Start paid API run", type="primary", use_container_width=True, disabled=demo_safe_mode):
+    if confirm_cols[0].button("Confirm paid search and AI run", type="primary", use_container_width=True):
         st.session_state["active_verify_mode"] = pending_mode
         run_step = "verify"
         st.session_state.pop("pending_verify_run", None)
-    if confirm_cols[1].button("Cancel API run", use_container_width=True):
+    if confirm_cols[1].button("Cancel", use_container_width=True):
         st.session_state.pop("pending_verify_run", None)
         st.rerun()
 
@@ -2273,6 +2157,226 @@ provider_spend = calculate_provider_billed_spend(
 )
 local_openai_estimate = _local_openai_estimate_usd(metrics, runtime_settings)
 last_run_local_openai_estimate = _last_run_local_openai_estimate_usd(last_run)
+
+cascade_summary = db.homepage_evidence_summary(conn, mode=verify_mode) if not frame.empty else {}
+tavily_avoided = int(cascade_summary.get("score_from_homepage") or 0)
+
+st.markdown("<div class='section-label'>Pipeline</div>", unsafe_allow_html=True)
+_render_mini_metrics(
+    [
+        ("Manifest names", _format_int(metrics["unique_companies"])),
+        ("After first screen", _format_int(candidate_count)),
+        ("Homepage checked", _format_int(cascade_summary.get("homepage_attempted") or 0)),
+        ("AI-scored", _format_int(metrics["openai_scored"])),
+    ]
+)
+_render_summary_card(
+    "How the list narrows",
+    [
+        ("1. Manifest list", f"{_format_int(metrics['raw_companies'])} rows, {_format_int(metrics['unique_companies'])} unique company names"),
+        ("2. First screen", f"{_format_int(candidate_count)} API-eligible companies after removing obvious non-prospects"),
+        ("3. Homepage evidence", f"{_format_int(cascade_summary.get('homepage_attempted') or 0)} checked, {_format_int(cascade_summary.get('score_from_homepage') or 0)} had enough evidence without paid search"),
+        ("4. Search enrichment", f"{_format_int(cascade_summary.get('needs_tavily') or 0)} still need Tavily because homepage evidence is missing or unclear"),
+        ("5. AI scoring", f"{_format_int(metrics['openai_scored'])} companies scored from evidence packets"),
+    ],
+)
+
+st.markdown("<div class='section-label'>Cost and usage</div>", unsafe_allow_html=True)
+_render_mini_metrics(
+    [
+        ("Actual billed cost", _format_billed_total(provider_spend)),
+        ("OpenAI tokens", _format_int(int(run_totals.get("total_tokens") or 0))),
+        ("Search credits used", _format_int(tavily_billing.credits_used)),
+        ("Search calls avoided", _format_int(tavily_avoided)),
+    ]
+)
+with st.expander("Cost details", expanded=False):
+    _render_cost_hero(
+        provider_spend=provider_spend,
+        lifetime_openai_billing=lifetime_openai_billing,
+        recent_openai_billing=recent_openai_billing,
+        tavily_billing=tavily_billing,
+        local_openai_estimate=local_openai_estimate,
+        total_tokens=int(run_totals.get("total_tokens") or 0),
+        openai_calls=int(run_totals.get("openai_calls") or 0),
+        last_api_calls=last_api_calls,
+        last_run_local_openai_estimate=last_run_local_openai_estimate,
+        model_name=str(runtime_settings.openai_model),
+    )
+    _render_summary_card(
+        "Provider setup",
+        [
+            ("OpenAI billing", _billing_status(lifetime_openai_billing)),
+            ("Billing start", str(lifetime_openai_billing.window_start_label or "Unavailable")),
+            ("Tavily billing", f"{tavily_billing.plan_name}, pay-as-you-go {'on' if tavily_billing.pay_as_you_go_enabled else 'off'}"),
+            ("Tavily credits remaining", _format_int(tavily_billing.free_credits_remaining)),
+            ("Streamlit Community Cloud hosting", _format_currency(provider_spend.hosting_billed_usd)),
+        ],
+    )
+
+if frame.empty:
+    st.warning("Start by loading the Manifest list. No paid APIs are used in the first screen.")
+    st.stop()
+
+st.markdown("<div class='section-label'>Ranked prospects</div>", unsafe_allow_html=True)
+_render_prospect_cards(
+    prospects.head(8),
+    "No AI-scored prospects yet. Run the evidence cascade first.",
+)
+
+with st.expander("Why companies moved through the funnel", expanded=False):
+    cascade_detail_rows = [
+        ("API-eligible companies", _format_int(cascade_summary.get("api_eligible") or candidate_count)),
+        ("Homepage evidence attempted", _format_int(cascade_summary.get("homepage_attempted") or 0)),
+        ("Accepted domains", _format_int(cascade_summary.get("accepted_domains") or 0)),
+        ("Provisional domains", _format_int(cascade_summary.get("provisional_domains") or 0)),
+        ("Unresolved domains", _format_int(cascade_summary.get("unresolved_domains") or 0)),
+        ("Homepage-positive companies", _format_int(cascade_summary.get("score_from_homepage") or 0)),
+        ("Soft-excluded", _format_int(cascade_summary.get("soft_excluded") or 0)),
+        ("Data gaps", _format_int(cascade_summary.get("data_gaps") or 0)),
+    ]
+    paid_avoidance_rows = [
+        ("Search calls avoided", _format_int(tavily_avoided)),
+        ("Needs search", _format_int(cascade_summary.get("needs_tavily") or 0)),
+        ("Estimated search credits saved", _format_int(tavily_avoided)),
+        ("Estimated search cost saved", _format_currency(tavily_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0))),
+    ]
+    cols = st.columns((1, 1))
+    with cols[0]:
+        _render_summary_card("Evidence cascade", cascade_detail_rows)
+    with cols[1]:
+        _render_summary_card("Search avoided", paid_avoidance_rows)
+
+    route_cols = st.columns(2)
+    with route_cols[0]:
+        _render_route_examples(
+            "Homepage evidence sufficient",
+            db.homepage_route_examples(conn, route="score_from_homepage", limit=3),
+        )
+        _render_route_examples(
+            "Data gaps",
+            db.homepage_route_examples(conn, route="low_priority_data_gap", limit=3),
+        )
+    with route_cols[1]:
+        _render_route_examples(
+            "Needs search",
+            db.homepage_route_examples(conn, route="needs_tavily", limit=3),
+        )
+        _render_route_examples(
+            "Soft-exclude",
+            db.homepage_route_examples(conn, route="soft_exclude", limit=3),
+        )
+
+    audit_frame = _audit_sample_frame(db.false_negative_audit_sample(conn, limit=12, mode=verify_mode))
+    st.markdown("<div class='section-label'>False-negative audit sample</div>", unsafe_allow_html=True)
+    if audit_frame.empty:
+        st.markdown("<div class='empty-state'>No audit samples yet.</div>", unsafe_allow_html=True)
+    else:
+        _render_table(
+            audit_frame,
+            [
+                ("canonical_name", "Company", "company"),
+                ("audit_reason", "Audit reason", "text"),
+                ("route_decision", "Route", "label"),
+                ("domain_confidence_display", "Domain confidence", "text"),
+                ("evidence_snippet", "Evidence snippet", "text"),
+            ],
+            "No audit samples yet.",
+        )
+
+with st.expander("Company detail", expanded=False):
+    detail_source = prospects if not prospects.empty else weighted_frame
+    if detail_source.empty:
+        st.warning("No companies available.")
+    else:
+        selected_company = st.selectbox("Company", detail_source["canonical_name"].tolist())
+        selected_row = detail_source[detail_source["canonical_name"] == selected_company].iloc[0]
+        detail_cols = st.columns(4)
+        detail_cols[0].metric("Fit score", f"{int(selected_row['weighted_score'])}/100")
+        detail_cols[1].metric("WV edge", f"{int(selected_row['wittington_edge'])}/20")
+        detail_cols[2].metric("Type", str(selected_row.get("company_type_display") or "Needs evidence"))
+        detail_cols[3].metric("Confidence", str(selected_row.get("confidence_display") or "Low"))
+        st.markdown(
+            "<div class='detail-box'>"
+            f"<div class='detail-title'>{html.escape(_clean_ui_text(selected_row['canonical_name']))}</div>"
+            f"<div class='detail-text'><strong>Why ranked:</strong> {html.escape(_clean_ui_text(selected_row.get('rationale') or 'No rationale yet.'))}</div>"
+            f"<div class='detail-text'><strong>Evidence:</strong> {html.escape(_clean_ui_text(selected_row.get('evidence_summary') or 'No external evidence yet.'))}</div>"
+            f"<div class='detail-text'><strong>Source:</strong> {html.escape(_clean_ui_text(selected_row.get('evidence_source_display') or 'None'))}</div>"
+            f"<div class='detail-text'><strong>Data gap or route reason:</strong> {html.escape(_clean_ui_text(selected_row.get('homepage_route_reason') or selected_row.get('homepage_fetch_error') or 'No route reason recorded.'))}</div>"
+            f"<div class='detail-text'><strong>Evidence snippet:</strong> {html.escape(_clean_ui_text(_truncate(selected_row.get('homepage_evidence_text') or selected_row.get('evidence_summary') or 'No evidence snippet available.', 260)))}</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+with st.expander("CSV exports and source sample", expanded=False):
+    source_export = weighted_frame[
+        [
+            "raw_name",
+            "canonical_name",
+            "source_status",
+            "deterministic_type_display",
+            "sector_tags_text",
+            "weighted_score",
+            "duplicate_count",
+            "deterministic_exclusion_reason",
+        ]
+    ].rename(
+        columns={
+            "raw_name": "Raw attendee entry",
+            "canonical_name": "Cleaned company",
+            "source_status": "Status",
+            "deterministic_type_display": "First screen",
+            "sector_tags_text": "Sectors",
+            "weighted_score": "Screen score",
+            "duplicate_count": "Rows",
+            "deterministic_exclusion_reason": "Filter reason",
+        }
+    )
+    prospect_export = prospects[
+        [
+            "rank",
+            "canonical_name",
+            "weighted_score",
+            "company_type_display",
+            "confidence_display",
+            "evidence_source_display",
+            "sector_tags_text",
+            "website",
+            "primary_source_url",
+            "rationale",
+            "evidence_summary",
+        ]
+    ].rename(
+        columns={
+            "rank": "Rank",
+            "canonical_name": "Company",
+            "weighted_score": "Fit score",
+            "company_type_display": "Type",
+            "confidence_display": "Confidence",
+            "evidence_source_display": "Evidence source",
+            "sector_tags_text": "Sectors",
+            "website": "Website",
+            "primary_source_url": "Primary source",
+            "rationale": "Rationale",
+            "evidence_summary": "Evidence summary",
+        }
+    )
+    export_cols = st.columns(2)
+    export_cols[0].download_button(
+        "Download source CSV",
+        data=source_export.to_csv(index=False),
+        file_name="manifest_source_list.csv",
+        mime="text/csv",
+    )
+    export_cols[1].download_button(
+        "Download prospects CSV",
+        data=prospect_export.to_csv(index=False),
+        file_name="manifest_verified_prospects.csv",
+        mime="text/csv",
+    )
+    _render_source_cards(source_rows, "No source rows loaded.")
+
+st.stop()
 
 if simple_demo_view:
     _render_mini_metrics(

@@ -90,7 +90,7 @@ Under the current pricing assumptions, a broad all-candidate test run is not aut
 
 ## Interface Decisions
 
-The Streamlit interface is organized around the work an investor or associate needs to do: prepare the source list, verify a selected batch, then review ranked results. The Overview tab shows source coverage, prospect status, charts, and API usage. The Source list keeps cleaned source rows visible. The Verified prospects tab presents ranked companies with company descriptions, sector tags, score components, confidence, rationale, and evidence. The Company detail tab supports deeper review of one company at a time.
+The Streamlit interface is organized around the investor narrative rather than developer controls. The visible flow starts with the pipeline: Manifest list, first screen, homepage evidence, search enrichment, and AI scoring. It then shows cost and usage, ranked prospects, and a small number of evidence inspection expanders for route examples, audit samples, company detail, and CSV exports. The goal is for the interviewer to understand the filtering logic, evidence quality, and cost discipline without first navigating charts, tuning controls, or implementation settings.
 
 The API usage section was deliberately simplified. It now uses concise labels such as all-time billed cost, OpenAI billed cost for the recent window, internal token-rate estimate, Tavily credits used, last run API calls, and last run token-rate estimate. Slash notation was removed where it could be mistaken for a rate or fraction. Long explanatory billing paragraphs were replaced with compact metadata rows for live billing source, OpenAI project, billing start, last fetched, cache status, Tavily plan, and Streamlit Cloud hosting.
 
@@ -118,7 +118,7 @@ Ranked prospect cards and company detail views now show whether the supporting e
 
 The app also includes a lightweight false-negative audit sample. It surfaces soft-excluded rows, low-priority data gaps, unresolved domains, and ambiguous companies not yet selected by the current cap. This is not production-grade validation, but it shows the right operating discipline: uncertain or rejected rows should be sampled so the fund can estimate what the funnel might be missing.
 
-For the live demo, the app has a default-on simple demo view and demo safe mode. Simple demo view keeps the investor-facing path focused on the next action, four key cascade metrics, top prospects, and optional detail expanders instead of showing every technical chart at once. Safe mode keeps the homepage evidence preview available but disables the paid Tavily/OpenAI run button. The intended narrative is simple: the tool does not judge raw company names; it gathers cheap homepage evidence first; it escalates to search only when evidence is missing or unclear; OpenAI scores evidence packets rather than names; and the UI exposes confidence, snippets, route reasons, search calls avoided, and audit samples.
+For the live demo, the app is intentionally focused on the core investor workflow instead of developer controls. The visible surface is the pipeline, the cost and usage report, ranked prospects, and a small number of evidence inspection expanders. The intended narrative is simple: the tool starts with the Manifest list; removes obvious non-prospects; gathers cheap homepage evidence first; escalates to Tavily only when evidence is missing or unclear; sends compact evidence packets to OpenAI for scoring; and reports actual billed cost, tokens, search credits, and paid calls avoided.
 
 ## Validation
 

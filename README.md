@@ -1,6 +1,6 @@
 # Manifest Prospecting Tool
 
-Manifest Prospecting Tool is an internal VC sourcing dashboard for Wittington Ventures. It turns the public Manifest attendee list into two clear working views: a source list with cleaned attendee rows and a verified prospect list backed by external evidence.
+Manifest Prospecting Tool is an internal VC sourcing workflow for Wittington Ventures. It turns the public Manifest attendee list into an evidence-backed ranked prospect list with clear cost and API usage reporting.
 
 The product uses code for retrieval, storage, filtering, concurrency, retry handling, and cost control. It uses Tavily for external search evidence, then uses OpenAI for scoring after that evidence has been retrieved and cached.
 
@@ -8,17 +8,14 @@ Hosted app: https://wv-manifest-prospecting-tool-b8jadagmhgsh8wirbknjb9.streamli
 
 ## Current App
 
-- Guided Streamlit workflow with three steps: prepare source list, verify prospects, review results.
-- Responsive source cards for messy attendee data after cleaning, dedupe, and rule screening.
-- Verified prospects view for companies that passed evidence enrichment and API scoring.
-- Larger full-width charts with horizontal labels for readability.
-- Responsive prospect cards so company descriptions and sector tags stay readable across desktop, tablet, and mobile.
-- Prominent API usage and cost summary that separates live provider billing, included Tavily credits, Streamlit Cloud hosting, and internal token-rate estimates.
+- Focused Streamlit workflow built around the investor narrative: Manifest list, first screen, homepage evidence, search enrichment, AI scoring, ranked prospects.
+- Pipeline section that shows exactly how the source list narrows at each stage.
+- Ranked prospect cards backed by source URLs, evidence snippets, confidence, and route reasons.
+- Cost and usage section that separates live provider billing, included Tavily credits, Streamlit Community Cloud hosting, and internal token-rate estimates.
 - Wittington project lifetime-to-date OpenAI billing, recent OpenAI billing, last fetch time, cache status, and billing-window metadata.
-- Model selector, verification mode, and batch cap for controlling how many companies get verified in each run, with pre-run cost and runtime confirmation before paid provider calls begin.
+- Pre-run cost and runtime confirmation before paid provider calls begin.
 - Concurrent Tavily enrichment and OpenAI scoring with bounded retry/backoff for rate limits and transient provider errors.
-- Scoring weight controls for investor preference changes.
-- Simple reset button that clears local source rows, cached enrichments, scores, and run history.
+- Evidence inspection section with route examples and a false-negative audit sample.
 - CSV exports for source rows and verified prospects.
 
 ## Tech Stack
@@ -85,13 +82,12 @@ streamlit run app.py
 Use the dashboard in this order:
 
 1. Click **1. Load and screen source data**.
-2. Leave **Simple demo view** and **Demo safe mode** on for an interview walkthrough. Simple demo view shows one guided path first. Safe mode keeps homepage evidence preview available and disables the paid Tavily/OpenAI run button.
+2. Review the **Pipeline** section to see how the raw Manifest list narrows into API-eligible companies.
 3. Click **2. Review evidence and cost estimate**.
-4. Click **Preview homepage evidence sample** to populate a fast no-paid evidence cascade sample.
-5. Review the compact Evidence Cascade, search calls avoided, data gaps, and top verified prospects.
-6. Open the detail expanders only when needed: route examples, false-negative audit sample, billing details, charts, and internal estimates.
-7. Turn off **Demo safe mode** only if you intentionally want to start a paid provider run, then choose the batch settings and click **Start paid API run**.
-8. Review the Overview, Source list, Verified prospects, and Company detail tabs.
+4. Click **Preview homepage evidence - no paid APIs** to show the low-cost homepage/domain layer before paid search.
+5. Review the run estimate: companies, Tavily search calls, OpenAI scoring calls, estimated provider cost, search calls avoided, and tokens.
+6. Click **Confirm paid search and AI run** only after the estimate is acceptable.
+7. Review **Ranked prospects**, **Cost and usage**, and **Why companies moved through the funnel**.
 
 For a command-line run:
 
