@@ -2517,7 +2517,7 @@ st.markdown("<div class='header-divider'></div>", unsafe_allow_html=True)
 _render_slide_progress(slide_index, slide_count)
 _render_slide_header(slide["label"], slide["title"], slide["copy"])
 
-footer_action_label = "Refresh"
+footer_action_label = "Next"
 footer_action_key = f"slide_action_{slide['key']}"
 footer_action_disabled = False
 footer_action_help = None
@@ -2539,12 +2539,6 @@ if slide["key"] == "overview":
         ],
     )
 elif slide["key"] == "source":
-    if workflow_stage == 1:
-        footer_action_label = "Load Manifest list"
-        footer_action_target = "load_manifest"
-    else:
-        footer_action_label = "Next"
-        footer_action_target = "next"
     _render_mini_metrics(
         [
             (
@@ -2566,17 +2560,10 @@ elif slide["key"] == "source":
             ("Saved rows", f"{_format_int(raw_manifest_row_count)} raw attendee-company rows"),
         ],
     )
+    if workflow_stage == 1 and st.button("Load Manifest list", type="primary", use_container_width=True, key="load_manifest_inline"):
+        st.session_state["load_manifest_requested"] = True
+        st.rerun()
 elif slide["key"] == "normalize":
-    if workflow_stage == 2:
-        footer_action_label = "Normalize company names"
-        footer_action_target = "normalize_manifest"
-    elif workflow_stage > 2:
-        footer_action_label = "Next"
-        footer_action_target = "next"
-    else:
-        footer_action_label = "Normalize company names"
-        footer_action_disabled = True
-        footer_action_help = "Load the Manifest list first."
     _render_mini_metrics(
         [
             (
@@ -2612,17 +2599,10 @@ elif slide["key"] == "normalize":
     )
     if workflow_stage == 1:
         st.warning("Load the Manifest list before normalizing company names.")
+    elif workflow_stage == 2 and st.button("Normalize company names", type="primary", use_container_width=True, key="normalize_manifest_inline"):
+        st.session_state["normalize_manifest_requested"] = True
+        st.rerun()
 elif slide["key"] == "exclusions":
-    if workflow_stage == 3:
-        footer_action_label = "Remove excluded rows"
-        footer_action_target = "prepare_manifest"
-    elif workflow_stage > 3:
-        footer_action_label = "Next"
-        footer_action_target = "next"
-    else:
-        footer_action_label = "Remove excluded rows"
-        footer_action_disabled = True
-        footer_action_help = "Load and normalize company names first."
     _render_mini_metrics(
         [
             (
@@ -2662,17 +2642,20 @@ elif slide["key"] == "exclusions":
         st.warning("Load the Manifest list before removing excluded rows.")
     elif workflow_stage == 2:
         st.warning("Normalize company names before removing excluded rows.")
+    elif workflow_stage == 3 and st.button("Remove excluded rows", type="primary", use_container_width=True, key="prepare_manifest_inline"):
+        st.session_state["prepare_manifest_requested"] = True
+        st.rerun()
 elif slide["key"] == "homepage":
     if workflow_stage >= 4:
         prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
         pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode)
         pending_mode = pending_verify_run.get("mode", verify_mode)
         _render_summary_card(
-            "Page-check setup",
+            "Page-check plan",
             [
                 ("Selected batch", f"{_format_int(prospect_cap)} companies"),
-                ("Operation", "Resolve likely domains and read homepage title, description, headings, and short text"),
-                ("After this runs", "Companies with enough page data can skip Tavily; the rest are routed to web search"),
+                ("What happens", "Read homepage metadata before deciding which companies need web search"),
+                ("Why it matters", "Good page data can skip Tavily and go straight to scoring"),
             ],
         )
     homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
@@ -2681,61 +2664,39 @@ elif slide["key"] == "homepage":
     homepage_data_gaps = int(cascade_summary.get("data_gaps") or 0)
     homepage_pending = int((pending_verify_run or {}).get("projected_homepage_candidates") or 0)
     if workflow_stage < 4:
-        footer_action_label = "Check company pages"
-        footer_action_disabled = True
-        footer_action_help = "Remove excluded rows before checking company pages."
-    elif homepage_pending <= 0:
-        footer_action_label = "Next"
-        footer_action_target = "next"
+        st.warning("Remove excluded rows before checking company pages.")
+    elif homepage_pending > 0 and st.button("Check company pages", type="primary", use_container_width=True, key="check_company_pages_inline"):
+        st.session_state["active_verify_mode"] = pending_mode
+        st.session_state["homepage_check_cap"] = int(prospect_cap)
+        st.session_state["check_company_pages_requested"] = True
+        st.rerun()
+
+    if homepage_checked > 0:
+        _render_mini_metrics(
+            [
+                (
+                    "Company pages checked",
+                    _format_int(homepage_checked),
+                    "Companies with homepage metadata saved.",
+                ),
+                (
+                    "Ready from page data",
+                    _format_int(homepage_scoreable),
+                    "These can be scored without Tavily Search API.",
+                ),
+                (
+                    "Need web search",
+                    _format_int(homepage_needs_search),
+                    "These continue to Step 5 for Tavily evidence.",
+                ),
+            ]
+        )
     else:
-        footer_action_label = "Check company pages"
-        footer_action_target = "check_company_pages"
-    _render_mini_metrics(
-        [
-            (
-                "Company pages checked",
-                _format_int(homepage_checked),
-                "The app tries the company domain and reads homepage title, description, headings, and short text.",
-            ),
-            (
-                "Page data used for scoring",
-                _format_int(homepage_scoreable),
-                "These companies had enough homepage text to send to OpenAI scoring without Tavily Search API.",
-            ),
-            (
-                "Companies sent to web search",
-                _format_int(homepage_needs_search),
-                "These companies did not have enough homepage text, so the next step uses Tavily Search API.",
-            ),
-            (
-                "Companies without enough page data",
-                _format_int(homepage_data_gaps),
-                "These rows had no usable homepage text from the page check.",
-            ),
-        ]
-    )
-    _render_summary_card(
-        "Page-check result",
-        [
-            ("Reads", "Domains, page titles, descriptions, headings, and snippets"),
-            ("Company pages checked", f"{_format_int(homepage_checked)} companies"),
-            ("Page data used for scoring", f"{_format_int(homepage_scoreable)} companies"),
-            ("Routed to web search", f"{_format_int(homepage_needs_search)} companies"),
-        ],
-    )
+        st.info("No company pages checked yet. Choose the batch size, then run the page check.")
 elif slide["key"] == "estimate":
-    footer_action_label = "Run search and scoring"
     if pending_verify_run:
         prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
         homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
-        if int(metrics.get("openai_scored") or 0) > 0:
-            footer_action_label = "Next"
-            footer_action_target = "next"
-        elif homepage_checked <= 0:
-            footer_action_disabled = True
-            footer_action_help = "Check company pages before approving the search and scoring run."
-        else:
-            footer_action_target = "start_paid_run"
         _render_mini_metrics(
             [
                 (
@@ -2762,20 +2723,29 @@ elif slide["key"] == "estimate":
         )
         _render_summary_card("Search and scoring setup", projected_rows)
         _render_summary_card("Company-page and web-search setup", cascade_rows)
-        _render_summary_card(
-            "Current search and scoring result",
-            [
-                ("OpenAI-scored companies", _format_int(metrics.get("openai_scored") or 0)),
-                ("Scored from company pages", _format_int(tavily_avoided)),
-                ("Tavily Search API calls recorded", _format_int(run_totals.get("tavily_calls") or 0)),
-                ("OpenAI API scoring calls recorded", _format_int(run_totals.get("openai_calls") or 0)),
-                ("OpenAI API tokens recorded", _format_int(run_totals.get("total_tokens") or 0)),
-                ("Estimated OpenAI token cost", _format_currency(local_openai_estimate)),
-            ],
-        )
+        if homepage_checked <= 0:
+            st.warning("Check company pages before running web search and scoring.")
+        elif int(metrics.get("openai_scored") or 0) <= 0:
+            if st.button("Run web search and scoring", type="primary", use_container_width=True, key="start_paid_run_inline"):
+                st.session_state["active_verify_mode"] = pending_mode
+                st.session_state["start_paid_run_requested"] = True
+                st.rerun()
+
+        if int(metrics.get("openai_scored") or 0) > 0:
+            _render_summary_card(
+                "Current search and scoring result",
+                [
+                    ("OpenAI-scored companies", _format_int(metrics.get("openai_scored") or 0)),
+                    ("Scored from company pages", _format_int(tavily_avoided)),
+                    ("Tavily Search API calls recorded", _format_int(run_totals.get("tavily_calls") or 0)),
+                    ("OpenAI API scoring calls recorded", _format_int(run_totals.get("openai_calls") or 0)),
+                    ("OpenAI API tokens recorded", _format_int(run_totals.get("total_tokens") or 0)),
+                    ("Estimated OpenAI token cost", _format_currency(local_openai_estimate)),
+                ],
+            )
+        else:
+            st.info("No scored companies yet. Run web search and scoring when the estimate looks right.")
     else:
-        footer_action_disabled = True
-        footer_action_help = "Load, normalize, and remove excluded rows before approving a run."
         st.warning("Load the Manifest list before estimating search and scoring.")
 elif slide["key"] == "cost":
     footer_action_label = "Next"
@@ -2888,19 +2858,6 @@ if footer_clicked:
         st.session_state["slide_index"] = min(slide_count - 1, slide_index + 1)
     elif footer_action_target == "overview":
         st.session_state["slide_index"] = 0
-    elif footer_action_target == "load_manifest":
-        st.session_state["load_manifest_requested"] = True
-    elif footer_action_target == "normalize_manifest":
-        st.session_state["normalize_manifest_requested"] = True
-    elif footer_action_target == "prepare_manifest":
-        st.session_state["prepare_manifest_requested"] = True
-    elif footer_action_target == "check_company_pages":
-        st.session_state["active_verify_mode"] = pending_mode
-        st.session_state["homepage_check_cap"] = int(prospect_cap)
-        st.session_state["check_company_pages_requested"] = True
-    elif footer_action_target == "start_paid_run":
-        st.session_state["active_verify_mode"] = pending_mode
-        st.session_state["start_paid_run_requested"] = True
     elif slide["key"] == "overview":
         st.session_state["slide_index"] = min(slide_count - 1, 1)
     st.rerun()
