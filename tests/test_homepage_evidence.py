@@ -323,7 +323,7 @@ def test_precision_mode_includes_homepage_positive_ambiguous_rows(tmp_path: Path
     tavily_queue = db.candidates_for_enrichment(conn, limit=10, mode="precision-first")
 
     assert [company["canonical_name"] for company in scoreable] == ["Ambiguous Platform"]
-    assert [company["canonical_name"] for company in tavily_queue] == ["Likely Tech"]
+    assert tavily_queue == []
     assert db.count_candidate_universe(conn, mode="precision-first") == 2
 
 

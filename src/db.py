@@ -658,7 +658,7 @@ def candidates_for_enrichment(
             LEFT JOIN homepage_evidence h ON h.company_id = c.id
             WHERE c.is_candidate = 1 {priority_filter} {mode_filter}
               AND e.id IS NULL
-              AND COALESCE(h.route_decision, '') NOT IN ('score_from_homepage', 'soft_exclude', 'low_priority_data_gap')
+              AND h.route_decision = 'needs_tavily'
             ORDER BY
               {priority_order}
               c.canonical_name COLLATE NOCASE

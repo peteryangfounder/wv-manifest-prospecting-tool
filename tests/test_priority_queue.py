@@ -52,6 +52,44 @@ def test_paid_queue_orders_high_signal_before_ambiguous_without_dropping_ambiguo
     )
 
     run_deterministic_classification(conn)
+    assert db.candidates_for_enrichment(conn, limit=10) == []
+
+    db.save_homepage_evidence(
+        conn,
+        {
+            "company_id": next(company["id"] for company in db.list_companies(conn) if company["canonical_name"] == "Alpha AI"),
+            "candidate_domain": "alphaai.com",
+            "resolved_url": None,
+            "domain_confidence": 0.0,
+            "domain_status": "unresolved",
+            "metadata_json": {},
+            "evidence_text": "",
+            "evidence_quality": 0.0,
+            "positive_signals": [],
+            "negative_signals": [],
+            "route_decision": "needs_tavily",
+            "route_reason": "company page did not provide enough data",
+            "fetch_error": None,
+        },
+    )
+    db.save_homepage_evidence(
+        conn,
+        {
+            "company_id": next(company["id"] for company in db.list_companies(conn) if company["canonical_name"] == "Northstar Labs"),
+            "candidate_domain": "northstarlabs.com",
+            "resolved_url": None,
+            "domain_confidence": 0.0,
+            "domain_status": "unresolved",
+            "metadata_json": {},
+            "evidence_text": "",
+            "evidence_quality": 0.0,
+            "positive_signals": [],
+            "negative_signals": [],
+            "route_decision": "needs_tavily",
+            "route_reason": "company page did not provide enough data",
+            "fetch_error": None,
+        },
+    )
     candidates = db.candidates_for_enrichment(conn, limit=10)
 
     assert [candidate["canonical_name"] for candidate in candidates] == ["Alpha AI", "Northstar Labs"]

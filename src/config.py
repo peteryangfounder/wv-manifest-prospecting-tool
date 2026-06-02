@@ -125,7 +125,7 @@ def get_settings() -> Settings:
         tavily_max_results=_env_int("TAVILY_MAX_RESULTS", 3),
         openai_input_cost_per_1m_tokens=_env_float("OPENAI_INPUT_COST_PER_1M_TOKENS", 0.15),
         openai_output_cost_per_1m_tokens=_env_float("OPENAI_OUTPUT_COST_PER_1M_TOKENS", 0.60),
-        tavily_cost_per_call_usd=_env_float("TAVILY_COST_PER_CALL_USD", 0.001),
+        tavily_cost_per_call_usd=_env_float("TAVILY_COST_PER_CALL_USD", 0.008),
         tavily_plan_name=os.getenv("TAVILY_PLAN_NAME", "Researcher"),
         tavily_included_monthly_credits=_env_int("TAVILY_INCLUDED_MONTHLY_CREDITS", 1000),
         tavily_pay_as_you_go_enabled=_env_bool("TAVILY_PAY_AS_YOU_GO_ENABLED", False),

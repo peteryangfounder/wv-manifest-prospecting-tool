@@ -65,7 +65,7 @@ TAVILY_MAX_RESULTS=3
 DATABASE_PATH=data/prospects.db
 OPENAI_INPUT_COST_PER_1M_TOKENS=0.15
 OPENAI_OUTPUT_COST_PER_1M_TOKENS=0.60
-TAVILY_COST_PER_CALL_USD=0.001
+TAVILY_COST_PER_CALL_USD=0.008
 OPENAI_BILLING_PROJECT_ID=proj_ynS2F3GVOCBbgmXvTl9Vl1Ie
 OPENAI_BILLING_START_DATE=2026-05-31
 OPENAI_BILLING_LOOKBACK_DAYS=30
@@ -207,7 +207,7 @@ The **API usage and cost** section separates provider-billed spend from internal
 
 Provider-billed OpenAI cost for the configured `OPENAI_BILLING_PROJECT_ID` is the source of truth for live billing when available. The primary dashboard total uses `OPENAI_BILLING_START_DATE` through the current time for the Wittington project lifetime-to-date window. The recent-cost card keeps `OPENAI_BILLING_LOOKBACK_DAYS` for a shorter usage view. OpenAI billing responses are paginated and cached for `OPENAI_BILLING_CACHE_TTL_SECONDS` because Streamlit reruns frequently. If project-scoped billing is unavailable and the OpenAI API returns organization-level fallback data, the app labels it as org-wide context and keeps it separate from the project billed-cost total. If live OpenAI billing is unavailable because `OPENAI_ADMIN_KEY` is missing or the API request fails, the app continues running and clearly labels the internal token-rate fallback as an estimate rather than platform billing data. SQLite stores every run so reruns can show cumulative calls, tokens, cache hits, retry counts, and local estimates.
 
-`TAVILY_COST_PER_CALL_USD` remains supported as an internal shadow estimate for projections. It is not included in actual provider-billed spend unless Tavily pay-as-you-go is explicitly enabled, in which case overage credits beyond `TAVILY_INCLUDED_MONTHLY_CREDITS` are billed using `TAVILY_PAYG_PRICE_PER_CREDIT_USD`.
+`TAVILY_COST_PER_CALL_USD` remains supported as an internal pay-as-you-go-equivalent estimate for projections. It is not included in actual provider-billed spend unless Tavily pay-as-you-go is explicitly enabled, in which case overage credits beyond `TAVILY_INCLUDED_MONTHLY_CREDITS` are billed using `TAVILY_PAYG_PRICE_PER_CREDIT_USD`.
 
 For the current demo configuration, Tavily pay-as-you-go should remain disabled unless Wittington explicitly wants automated overage billing. With pay-as-you-go disabled, the app can still report credits consumed and remaining included credits while keeping Tavily billed spend at `$0.00`.
 

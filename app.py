@@ -1842,7 +1842,7 @@ def _tavily_billing_from_metrics(metrics: dict, settings) -> TavilyBillingSummar
         pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", False),
         payg_price_per_credit_usd=_setting(settings, "tavily_payg_price_per_credit_usd", 0.008),
         plan_name=_setting(settings, "tavily_plan_name", "Researcher"),
-        shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.001),
+        shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.008),
     )
 
 
@@ -1887,7 +1887,7 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> 
         pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", False),
         payg_price_per_credit_usd=tavily_payg_price,
         plan_name=_setting(settings, "tavily_plan_name", "Researcher"),
-        shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.001),
+        shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.008),
     )
     tavily_after = calculate_tavily_billing(
         credits_used=existing_tavily_credits + projected_tavily_calls,
@@ -1895,15 +1895,15 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> 
         pay_as_you_go_enabled=_setting(settings, "tavily_pay_as_you_go_enabled", False),
         payg_price_per_credit_usd=tavily_payg_price,
         plan_name=_setting(settings, "tavily_plan_name", "Researcher"),
-        shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.001),
+        shadow_price_per_credit_usd=_setting(settings, "tavily_cost_per_call_usd", 0.008),
     )
     projected_tavily_bill = max(0.0, tavily_after.actual_billed_usd - tavily_before.actual_billed_usd)
     projected_tavily_overage = max(0, int(tavily_after.overage_credits) - int(tavily_before.overage_credits))
     projected_tavily_payg_if_enabled = projected_tavily_overage * max(0.0, float(tavily_payg_price or 0.0))
     tavily_calls_avoided = int(homepage_summary.get("score_from_homepage", 0))
     estimated_tavily_credits_saved = tavily_calls_avoided
-    estimated_tavily_cost_saved = tavily_calls_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0)
-    projected_tavily_usage_estimate = projected_tavily_calls * float(_setting(settings, "tavily_cost_per_call_usd", 0.001) or 0.0)
+    estimated_tavily_cost_saved = tavily_calls_avoided * float(_setting(settings, "tavily_cost_per_call_usd", 0.008) or 0.0)
+    projected_tavily_usage_estimate = projected_tavily_calls * float(_setting(settings, "tavily_cost_per_call_usd", 0.008) or 0.0)
     projected_total = projected_tavily_bill + projected_openai_estimate
 
     tavily_workers = max(1, min(_setting_int(settings, "tavily_concurrency", 12), max(1, projected_tavily_calls)))
@@ -2845,7 +2845,7 @@ elif slide["key"] == "search":
             [
                 ("Companies needing web search", _format_int(projected_tavily_calls)),
                 ("Can skip Tavily", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
-                ("Estimated Tavily usage cost", _format_currency(pending_verify_run["projected_tavily_usage_estimate"])),
+                ("Pay-as-you-go equivalent", _format_currency(pending_verify_run["projected_tavily_usage_estimate"])),
                 ("Estimated billed overage now", _format_currency(pending_verify_run["projected_tavily_bill"])),
                 ("Estimated web-search time", _format_duration(int((projected_tavily_calls / max(1, pending_verify_run["tavily_workers"])) * 3.0))),
             ],

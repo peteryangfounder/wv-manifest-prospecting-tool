@@ -84,7 +84,7 @@ def calculate_tavily_billing(
     pay_as_you_go_enabled: bool = False,
     payg_price_per_credit_usd: float = 0.008,
     plan_name: str = "Researcher",
-    shadow_price_per_credit_usd: float = 0.001,
+    shadow_price_per_credit_usd: float = 0.008,
 ) -> TavilyBillingSummary:
     credits = max(0, int(credits_used or 0))
     included = max(0, int(included_monthly_credits or 0))

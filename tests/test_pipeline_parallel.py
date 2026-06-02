@@ -54,7 +54,26 @@ def test_enrich_candidates_persists_parallel_results(monkeypatch, tmp_path: Path
     settings = _settings(tmp_path)
     conn = db.connect(settings.database_path)
     db.init_db(conn)
-    _seed_candidate_companies(conn, ["Alpha AI", "Beta Health", "Gamma Climate"])
+    companies = _seed_candidate_companies(conn, ["Alpha AI", "Beta Health", "Gamma Climate"])
+    for company in companies:
+        db.save_homepage_evidence(
+            conn,
+            {
+                "company_id": company["id"],
+                "candidate_domain": None,
+                "resolved_url": None,
+                "domain_confidence": 0.0,
+                "domain_status": "unresolved",
+                "metadata_json": {},
+                "evidence_text": "",
+                "evidence_quality": 0.0,
+                "positive_signals": [],
+                "negative_signals": [],
+                "route_decision": "needs_tavily",
+                "route_reason": "company page did not provide enough data",
+                "fetch_error": None,
+            },
+        )
 
     def fake_fetch(received_settings, company):
         assert received_settings is settings
