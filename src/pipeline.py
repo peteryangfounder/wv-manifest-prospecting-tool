@@ -248,7 +248,7 @@ def enrich_candidates(
     cache_hits = 0
     retry_attempts = 0
     provider_attempts = 0
-    workers = _bounded_worker_count(settings, "tavily_concurrency", 12, len(companies))
+    workers = _bounded_worker_count(settings, "tavily_concurrency", 48, len(companies))
     commit_interval = _commit_interval(settings)
 
     with ThreadPoolExecutor(max_workers=workers) as executor:

@@ -76,7 +76,7 @@ class Settings:
     openai_input_cost_per_1m_tokens: float
     openai_output_cost_per_1m_tokens: float
     tavily_cost_per_call_usd: float
-    tavily_concurrency: int = 12
+    tavily_concurrency: int = 48
     openai_concurrency: int = 6
     homepage_concurrency: int = 96
     db_commit_batch_size: int = 25
@@ -110,7 +110,7 @@ def get_settings() -> Settings:
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         max_enrich=_env_int("MAX_ENRICH", 75),
         max_score=_env_int("MAX_SCORE", 75),
-        tavily_concurrency=_env_int("TAVILY_CONCURRENCY", 12),
+        tavily_concurrency=_env_int("TAVILY_CONCURRENCY", 48),
         openai_concurrency=_env_int("OPENAI_CONCURRENCY", 6),
         homepage_concurrency=_env_int("HOMEPAGE_CONCURRENCY", 96),
         db_commit_batch_size=_env_int("DB_COMMIT_BATCH_SIZE", 25),

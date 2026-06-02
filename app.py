@@ -1906,7 +1906,7 @@ def _estimate_verify_run(conn, metrics: dict, settings, cap: int, mode: str) -> 
     projected_tavily_usage_estimate = projected_tavily_calls * float(_setting(settings, "tavily_cost_per_call_usd", 0.008) or 0.0)
     projected_total = projected_tavily_bill + projected_openai_estimate
 
-    tavily_workers = max(1, min(_setting_int(settings, "tavily_concurrency", 12), max(1, projected_tavily_calls)))
+    tavily_workers = max(1, min(_setting_int(settings, "tavily_concurrency", 48), max(1, projected_tavily_calls)))
     openai_workers = max(1, min(_setting_int(settings, "openai_concurrency", 6), max(1, projected_openai_calls)))
     tavily_seconds = projected_tavily_calls / tavily_workers * 3.0 if projected_tavily_calls else 0.0
     openai_seconds = projected_openai_calls / openai_workers * 4.0 if projected_openai_calls else 0.0
@@ -2847,6 +2847,7 @@ elif slide["key"] == "search":
                 ("Can skip Tavily", _format_int(pending_verify_run.get("cached_tavily_skipped") or 0)),
                 ("Pay-as-you-go equivalent", _format_currency(pending_verify_run["projected_tavily_usage_estimate"])),
                 ("Estimated billed overage now", _format_currency(pending_verify_run["projected_tavily_bill"])),
+                ("Parallel Tavily workers", _format_int(pending_verify_run["tavily_workers"])),
                 ("Estimated web-search time", _format_duration(int((projected_tavily_calls / max(1, pending_verify_run["tavily_workers"])) * 3.0))),
             ],
         )
