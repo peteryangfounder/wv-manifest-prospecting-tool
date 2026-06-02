@@ -2731,11 +2731,12 @@ elif slide["key"] == "homepage":
     homepage_data_gaps = int(cascade_summary.get("data_gaps") or 0)
     if workflow_stage < 4:
         st.warning("Remove excluded rows before checking company pages.")
-    elif page_check_run_count > 0 and st.button("Check company pages", type="primary", use_container_width=True, key="check_company_pages_inline"):
-        st.session_state["active_verify_mode"] = pending_mode
-        st.session_state["homepage_check_cap"] = int(page_check_run_count)
-        st.session_state["check_company_pages_requested"] = True
-        st.rerun()
+    elif page_check_run_count > 0:
+        if st.button("Check company pages", type="primary", use_container_width=True, key="check_company_pages_inline"):
+            st.session_state["active_verify_mode"] = pending_mode
+            st.session_state["homepage_check_cap"] = int(page_check_run_count)
+            st.session_state["check_company_pages_requested"] = True
+            st.rerun()
     elif workflow_stage >= 4 and selected_batch_remaining <= 0:
         st.info("The selected batch has already been checked. Choose a larger batch to check more company pages, or continue to Step 5.")
     elif workflow_stage >= 4:
@@ -2753,8 +2754,6 @@ elif slide["key"] == "homepage":
                 ("Need web search across checked pages", _format_int(homepage_needs_search)),
             ],
         )
-    else:
-        st.info("No company pages checked yet. Choose the batch size, then run the page check.")
 elif slide["key"] == "estimate":
     if pending_verify_run:
         prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
