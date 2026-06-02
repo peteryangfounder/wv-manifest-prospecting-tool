@@ -486,22 +486,6 @@ CUSTOM_CSS = """
   .stRadio input[type="radio"] {
     accent-color: var(--wv-accent) !important;
   }
-  .stRadio [data-baseweb="radio"] div,
-  .stRadio [role="radio"] div,
-  .stRadio [aria-checked="true"] div {
-    border-color: var(--wv-accent) !important;
-  }
-  .stRadio [data-baseweb="radio"] div div,
-  .stRadio [role="radio"][aria-checked="true"] div div,
-  .stRadio svg {
-    background-color: var(--wv-accent) !important;
-    color: var(--wv-accent) !important;
-    fill: var(--wv-accent) !important;
-  }
-  .stRadio svg {
-    color: var(--wv-accent) !important;
-    fill: var(--wv-accent) !important;
-  }
   .stage-table-block {
     border-top: 1px solid #edf0f4;
     margin: 1.05rem 0 1rem 0;
