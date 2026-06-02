@@ -2481,15 +2481,15 @@ if not cost_stage_table.empty:
     cost_stage_table["run_type_display"] = cost_stage_table["run_type"].apply(_humanize)
 
 slides = [
-    {"key": "overview", "label": "Overview", "title": "Manifest list to scored companies.", "copy": "Load company names, remove excluded organization types and placeholder names, check company pages, run web search when page data is incomplete, then score the remaining companies."},
+    {"key": "overview", "label": "Overview", "title": "Manifest list to scored companies.", "copy": "Steps 1-5 each show the operation setup and the current result from running it. Steps 6-8 are review pages for cost, scored companies, and routing details."},
     {"key": "source", "label": "Step 1", "title": "Load the Manifest list.", "copy": "Import raw attendee-company rows from the public Manifest attendee list."},
     {"key": "normalize", "label": "Step 2", "title": "Normalize company names.", "copy": "Convert raw attendee-company text into one saved company name per normalized company."},
     {"key": "exclusions", "label": "Step 3", "title": "Remove excluded rows.", "copy": "Remove incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names."},
     {"key": "homepage", "label": "Step 4", "title": "Check company pages.", "copy": "Read domains, page titles, descriptions, headings, and short homepage text before web search."},
-    {"key": "estimate", "label": "Step 5", "title": "Approve the run.", "copy": "Check the batch size, Tavily Search API calls, OpenAI API scoring calls, runtime, OpenAI API tokens, and estimated API cost."},
-    {"key": "cost", "label": "Step 6", "title": "Track OpenAI API and Tavily Search API cost.", "copy": "View OpenAI API billing, Tavily Search API credits, and OpenAI token-count estimates separately."},
-    {"key": "prospects", "label": "Step 7", "title": "View scored companies.", "copy": "Sort companies by total score and inspect the page text or search results used for scoring."},
-    {"key": "routing", "label": "Step 8", "title": "View company page and web search counts.", "copy": "See which companies were scored from company page data and which companies were sent to web search."},
+    {"key": "estimate", "label": "Step 5", "title": "Run web search and scoring.", "copy": "Review the selected batch, expected web-search and scoring calls, and current scored-result counts before or after running the operation."},
+    {"key": "cost", "label": "Review", "title": "Review API cost detail.", "copy": "Inspect OpenAI API billing, Tavily Search API credits, and token-count estimates after the run."},
+    {"key": "prospects", "label": "Review", "title": "Review scored companies.", "copy": "Inspect the companies scored from company-page or web-search evidence."},
+    {"key": "routing", "label": "Review", "title": "Review company-page and web-search routing.", "copy": "Inspect which companies were scored from page data and which companies needed web search."},
 ]
 slide_count = len(slides)
 slide_index = int(st.session_state.get("slide_index", 0))
@@ -2530,11 +2530,12 @@ if slide["key"] == "overview":
         [
             ("Raw rows", "Load attendee-company rows from Manifest."),
             ("Company names", "Normalize company names and merge duplicate names."),
-            ("Remove rows", "Remove incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names."),
-            ("Company page", "Read domains, titles, descriptions, and snippets."),
-            ("Web search", "Use Tavily when company page data is incomplete."),
-            ("Score", "Score each company against Wittington criteria."),
-            ("Results", "Show scored companies, OpenAI API cost, and Tavily Search API cost."),
+            ("Exclusions", "Remove incumbents, investors, associations, consulting firms, agencies, service providers, blank entries, and placeholder names."),
+            ("Company pages", "Choose the batch size, then read domains, titles, descriptions, and snippets."),
+            ("Search and score", "Run Tavily only when company-page data is incomplete, then score companies against Wittington criteria."),
+            ("Cost detail", "Review API calls, token estimates, and provider billing details."),
+            ("Scored companies", "Review the ranked companies and the evidence source used for scoring."),
+            ("Routing detail", "Review which companies used page data and which needed web search."),
         ],
     )
 elif slide["key"] == "source":
@@ -2666,6 +2667,14 @@ elif slide["key"] == "homepage":
         prospect_cap = _render_processing_controls(candidate_count, prospect_cap)
         pending_verify_run = _estimate_verify_run(conn, metrics, runtime_settings, int(prospect_cap), verify_mode)
         pending_mode = pending_verify_run.get("mode", verify_mode)
+        _render_summary_card(
+            "Page-check setup",
+            [
+                ("Selected batch", f"{_format_int(prospect_cap)} companies"),
+                ("Operation", "Resolve likely domains and read homepage title, description, headings, and short text"),
+                ("After this runs", "Companies with enough page data can skip Tavily; the rest are routed to web search"),
+            ],
+        )
     homepage_checked = int(cascade_summary.get("homepage_attempted") or 0)
     homepage_scoreable = int(cascade_summary.get("score_from_homepage") or 0)
     homepage_needs_search = int(cascade_summary.get("needs_tavily") or 0)
@@ -2706,10 +2715,12 @@ elif slide["key"] == "homepage":
         ]
     )
     _render_summary_card(
-        "Page check",
+        "Page-check result",
         [
             ("Reads", "Domains, page titles, descriptions, headings, and snippets"),
-            ("Page data used for scoring", f"{_format_int(tavily_avoided)} companies"),
+            ("Company pages checked", f"{_format_int(homepage_checked)} companies"),
+            ("Page data used for scoring", f"{_format_int(homepage_scoreable)} companies"),
+            ("Routed to web search", f"{_format_int(homepage_needs_search)} companies"),
         ],
     )
 elif slide["key"] == "estimate":
@@ -2749,8 +2760,19 @@ elif slide["key"] == "estimate":
                 ),
             ]
         )
-        _render_summary_card("Run estimate", projected_rows)
-        _render_summary_card("Company page and web search counts", cascade_rows)
+        _render_summary_card("Search and scoring setup", projected_rows)
+        _render_summary_card("Company-page and web-search setup", cascade_rows)
+        _render_summary_card(
+            "Current search and scoring result",
+            [
+                ("OpenAI-scored companies", _format_int(metrics.get("openai_scored") or 0)),
+                ("Scored from company pages", _format_int(tavily_avoided)),
+                ("Tavily Search API calls recorded", _format_int(run_totals.get("tavily_calls") or 0)),
+                ("OpenAI API scoring calls recorded", _format_int(run_totals.get("openai_calls") or 0)),
+                ("OpenAI API tokens recorded", _format_int(run_totals.get("total_tokens") or 0)),
+                ("Estimated OpenAI token cost", _format_currency(local_openai_estimate)),
+            ],
+        )
     else:
         footer_action_disabled = True
         footer_action_help = "Load, normalize, and remove excluded rows before approving a run."
